@@ -31,7 +31,7 @@ FastQAAnnotation = NamedTuple('FastQAAnnotation', [
     ('support_length', int),
     ('support_embeddings', np.ndarray),
     ('word_in_question', List[float]),
-    ('token_offsets', List[int]),
+    ('token_offsets', List[Tuple[int, int]]),
     ('answer_spans', Optional[List[Tuple[int, int]]]),
 ])
 
@@ -144,7 +144,8 @@ class FastQAInputModule(OnlineInputModule[FastQAAnnotation]):
         support_lengths = [a.support_length for a in annotations]
         question_lengths = [a.question_length for a in annotations]
         wiq = [a.word_in_question for a in annotations]
-        offsets = [a.token_offsets for a in annotations]
+        offsets = [[list(offset) for offset in a.token_offsets]
+                   for a in annotations]
 
         q_tokenized = [a.question_tokens for a in annotations]
         s_tokenized = [a.support_tokens for a in annotations]

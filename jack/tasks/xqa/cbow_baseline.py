@@ -29,7 +29,7 @@ CBowAnnotation = NamedTuple('CBowAnnotation', [
     ('support_length', int),
     ('support_embeddings', np.ndarray),
     ('word_in_question', List[float]),
-    ('token_offsets', List[int]),
+    ('token_offsets', List[Tuple[int, int]]),
     ('answertype_span', Tuple[int, int]),
     ('answer_spans', Optional[List[Tuple[int, int]]]),
 ])
@@ -194,6 +194,9 @@ class CBOWXqaInputModule(OnlineInputModule[CBowAnnotation]):
         q_tokenized = [a.question_tokens for a in annotations]
         s_tokenized = [a.support_tokens for a in annotations]
 
+        offsets = [[list(offset) for offset in a.token_offsets]
+                   for a in annotations]
+
         unique_words, unique_word_lengths, question2unique, support2unique = \
             unique_words_with_chars(q_tokenized, s_tokenized, self.char_vocab)
 
@@ -207,7 +210,7 @@ class CBOWXqaInputModule(OnlineInputModule[CBowAnnotation]):
             XQAPorts.emb_question: stack_and_pad(emb_questions),
             XQAPorts.question_length: [a.question_length for a in annotations],
             XQAPorts.word_in_question: [a.word_in_question for a in annotations],
-            XQAPorts.token_char_offsets: [a.token_offsets for a in annotations],
+            XQAPorts.token_char_offsets: offsets,
             CBOWXqaPorts.answer_type_span: [list(a.answertype_span) for a in annotations]
         }
 

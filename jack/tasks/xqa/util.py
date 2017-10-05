@@ -36,7 +36,7 @@ def prepare_data(qa_setting: QASetting,
                  max_support_length: int = -1) \
             -> Tuple[List[str], List[int], int,
                      List[str], List[int], int,
-                     List[float], List[int], List[Tuple[int, int]]]:
+                     List[float], List[Tuple[int, int]], List[Tuple[int, int]]]:
     """Preprocesses a question and (optionally) answers:
     The steps include tokenization, lower-casing, translation to IDs,
     computing the word-in-question feature, computing token offsets,
@@ -50,36 +50,42 @@ def prepare_data(qa_setting: QASetting,
     else:
         thistokenize = tokenize
 
-    support = " ".join(qa_setting.support)
+    supports = qa_setting.support
     question = qa_setting.question
 
     if lowercase:
-        support = support.lower()
+        supports = [s.lower() for s in supports]
         question = question.lower()
 
-    support_tokens, question_tokens = thistokenize(support), thistokenize(question)
+    supports_tokens = [thistokenize(s) for s in supports]
+    support_tokens_flat = [t for s in supports_tokens for t in s]
+    question_tokens = thistokenize(question)
 
     rng = random.Random(12345)
 
     word_in_question = []
-    for token in support_tokens:
+    for token in support_tokens_flat:
         if with_spacy:
             word_in_question.append(float(any(token.lemma == t2.lemma for t2 in question_tokens) and
-                             (not wiq_contentword or (token.orth_.isalnum() and not token.is_stop))))
+                                          (not wiq_contentword or (token.orth_.isalnum() and not token.is_stop))))
         else:
             word_in_question.append(float(token in question_tokens and (not wiq_contentword or token.isalnum())))
 
     if with_spacy:
-        token_offsets = [t.idx for t in support_tokens]
-        support_tokens = [t.orth_ for t in support_tokens]
+        token_offsets = [(doc_idx, token.idx)
+                         for doc_idx, support_tokens in enumerate(supports_tokens)
+                         for token in support_tokens]
+        support_tokens_flat = [t.orth_ for t in support_tokens_flat]
         question_tokens = [t.orth_ for t in question_tokens]
     else:
         # char to token offsets
-        token_offsets = token_to_char_offsets(support, support_tokens)
+        token_offsets = [(doc_idx, offset)
+                         for doc_idx, (support, tokens) in enumerate(zip(supports, supports_tokens))
+                         for offset in token_to_char_offsets(support, tokens)]
 
     question_length = len(question_tokens)
 
-    min_answer = len(support_tokens)
+    min_answer = len(support_tokens_flat)
     max_answer = 0
 
     answer_spans = []
@@ -88,15 +94,18 @@ def prepare_data(qa_setting: QASetting,
         assert isinstance(answers, list)
 
         for a in answers:
+            document_token_offsets = [offset for doc_idx, offset in token_offsets
+                                      if doc_idx == a.span[0]]
+
             start = 0
-            while start < len(token_offsets) and token_offsets[start] < a.span[0]:
+            while start < len(document_token_offsets) and document_token_offsets[start] < a.span[1]:
                 start += 1
 
-            if start == len(token_offsets):
+            if start == len(document_token_offsets):
                 continue
 
             end = start
-            while end + 1 < len(token_offsets) and token_offsets[end + 1] < a.span[1]:
+            while end + 1 < len(document_token_offsets) and document_token_offsets[end + 1] < a.span[2]:
                 end += 1
             if (start, end) not in answer_spans:
                 answer_spans.append((start, end))
@@ -104,9 +113,9 @@ def prepare_data(qa_setting: QASetting,
                 max_answer = max(max_answer, end)
 
     # cut support whenever there is a maximum allowed length and recompute answer spans
-    if max_support_length is not None and len(support_tokens) > max_support_length > 0:
+    if max_support_length is not None and len(support_tokens_flat) > max_support_length > 0:
         if max_answer < max_support_length:
-            support_tokens = support_tokens[:max_support_length]
+            support_tokens_flat = support_tokens_flat[:max_support_length]
             word_in_question = word_in_question[:max_support_length]
         else:
             offset = rng.randint(1, 11)
@@ -116,16 +125,16 @@ def prepare_data(qa_setting: QASetting,
                 answer_spans = [(s, e) for s, e in answer_spans if e < (new_end - offset)]
                 new_end = max(answer_spans, key=lambda span: span[1])[1] + offset
                 new_start = max(0, min(min_answer - offset, new_end - max_support_length))
-            support_tokens = support_tokens[new_start:new_end]
+            support_tokens_flat = support_tokens_flat[new_start:new_end]
             answer_spans = [(s - new_start, e - new_start) for s, e in answer_spans]
             word_in_question = word_in_question[new_start:new_end]
 
-    support_length = len(support_tokens)
+    support_length = len(support_tokens_flat)
 
-    support_ids, question_ids = vocab(support_tokens), vocab(question_tokens)
+    support_ids, question_ids = vocab(support_tokens_flat), vocab(question_tokens)
 
     return question_tokens, question_ids, question_length, \
-           support_tokens, support_ids, support_length, \
+           support_tokens_flat, support_ids, support_length, \
            word_in_question, token_offsets, answer_spans
 
 
