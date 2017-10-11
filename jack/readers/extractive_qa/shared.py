@@ -59,9 +59,9 @@ class XQAPorts:
     start_scores = FlatPorts.Prediction.start_scores
     end_scores = FlatPorts.Prediction.end_scores
     span_prediction = FlatPorts.Prediction.answer_span
-    token_char_offsets = TensorPort(tf.int32, [None, None, 2], "token_char_offsets",
-                                    "Document and character index of tokens in support.",
-                                    "[S, support_length, 2]")
+    token_offsets = TensorPort(tf.int32, [None, None, 2], "token_offsets",
+                               "Document and character index of tokens in support.",
+                               "[S, support_length, 2]")
 
     # ports used during training
     answer2question = FlatPorts.Input.answer2question
@@ -76,11 +76,11 @@ def _np_softmax(x):
     return e_x / e_x.sum(axis=0)
 
 
-def get_answer_and_span(question, support_length, span_prediction, token_char_offsets):
+def get_answer_and_span(question, support_length, span_prediction, token_offsets):
     start, end = span_prediction
-    document_start, char_start = token_char_offsets[start]
+    document_start, char_start = token_offsets[start]
     if end + 1 < support_length:
-        document_end, char_end = token_char_offsets[end + 1]
+        document_end, char_end = token_offsets[end + 1]
     else:
         document_end, char_end = len(question.support) - 1, len(question.support[-1])
 
@@ -102,13 +102,13 @@ class XQAOutputModule(OutputModule):
         self.vocab = shared_vocab_confg.vocab
         self.setup()
 
-    def __call__(self, questions, span_prediction, token_char_offsets, support_length, start_scores, end_scores) -> List[Answer]:
+    def __call__(self, questions, span_prediction, token_offsets, support_length, start_scores, end_scores) -> List[Answer]:
         answers = []
         for i, q in enumerate(questions):
             start, end = span_prediction[i]
             answer, doc_idx, span = get_answer_and_span(q, support_length[i],
                                                         span_prediction[i],
-                                                        token_char_offsets[i])
+                                                        token_offsets[i])
 
             start_probs = _np_softmax(start_scores[i])
             end_probs = _np_softmax(end_scores[i])
@@ -120,7 +120,7 @@ class XQAOutputModule(OutputModule):
 
     @property
     def input_ports(self) -> List[TensorPort]:
-        return [FlatPorts.Prediction.answer_span, XQAPorts.token_char_offsets,
+        return [FlatPorts.Prediction.answer_span, XQAPorts.token_offsets,
                 XQAPorts.support_length,
                 FlatPorts.Prediction.start_scores, FlatPorts.Prediction.end_scores]
 
@@ -130,14 +130,14 @@ class XQANoScoreOutputModule(OutputModule):
         self.vocab = shared_vocab_confg.vocab
         self.setup()
 
-    def __call__(self, questions, span_prediction, token_char_offsets,
+    def __call__(self, questions, span_prediction, token_offsets,
                  support_length) -> List[Answer]:
         answers = []
         for i, q in enumerate(questions):
             start, end = span_prediction[i]
             answer, doc_idx, span = get_answer_and_span(q, support_length[i],
                                                         span_prediction[i],
-                                                        token_char_offsets[i])
+                                                        token_offsets[i])
 
 
             answers.append(Answer(answer, span=span, doc_idx=doc_idx, score=1.0))
@@ -146,5 +146,5 @@ class XQANoScoreOutputModule(OutputModule):
 
     @property
     def input_ports(self) -> List[TensorPort]:
-        return [FlatPorts.Prediction.answer_span, XQAPorts.token_char_offsets,
+        return [FlatPorts.Prediction.answer_span, XQAPorts.token_offsets,
                 XQAPorts.support_length]

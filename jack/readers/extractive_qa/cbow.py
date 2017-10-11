@@ -113,7 +113,7 @@ class CBOWXqaInputModule(OnlineInputModule[CBowAnnotation]):
                 XQAPorts.correct_start_training, XQAPorts.answer2question_training,
                 XQAPorts.keep_prob, XQAPorts.is_eval,
                 # for output module
-                XQAPorts.token_char_offsets,
+                XQAPorts.token_offsets,
                 CBOWXqaPorts.answer_type_span]
 
     @property
@@ -206,7 +206,7 @@ class CBOWXqaInputModule(OnlineInputModule[CBowAnnotation]):
             XQAPorts.emb_question: stack_and_pad(emb_questions),
             XQAPorts.question_length: [a.question_length for a in annotations],
             XQAPorts.word_in_question: [a.word_in_question for a in annotations],
-            XQAPorts.token_char_offsets: offsets,
+            XQAPorts.token_offsets: offsets,
             CBOWXqaPorts.answer_type_span: [list(a.answertype_span) for a in annotations]
         }
 
@@ -225,7 +225,7 @@ class CBOWXqaInputModule(OnlineInputModule[CBowAnnotation]):
         # we can only numpify in here, because bucketing is not possible prior
         batch = numpify(output, keys=[XQAPorts.unique_word_chars,
                                       XQAPorts.question_words2unique, XQAPorts.support_words2unique,
-                                      XQAPorts.word_in_question, XQAPorts.token_char_offsets])
+                                      XQAPorts.word_in_question, XQAPorts.token_offsets])
         return batch
 
 

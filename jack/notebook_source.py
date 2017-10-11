@@ -68,7 +68,7 @@ We'll also use the `Ports.loss` port, because the the JTR training code expects 
 
 """
 
-print(XQAPorts.token_char_offsets.get_description())
+print(XQAPorts.token_offsets.get_description())
 print(XQAPorts.start_scores.get_description())
 print(XQAPorts.end_scores.get_description())
 print(XQAPorts.span_prediction.get_description())
@@ -113,7 +113,7 @@ class MyInputModule(OnlineInputModule):
                 question_length,             # Lengths of the questions
                 embedded_support,            # Support embeddings
                 support_length,              # Lengths of the supports
-                XQAPorts.token_char_offsets  # Character offsets of tokens in support, used for in ouput module
+                XQAPorts.token_offsets  # Character offsets of tokens in support, used for in ouput module
                ]
 
     @property
@@ -179,7 +179,7 @@ class MyInputModule(OnlineInputModule):
             embedded_question: emb_question,
             support_length: s_length,
             embedded_support: emb_support,
-            XQAPorts.token_char_offsets: token_offsets
+            XQAPorts.token_offsets: token_offsets
         }
 
         if has_answers:
@@ -188,7 +188,7 @@ class MyInputModule(OnlineInputModule):
             annotation[answer_span] = list(answer_spans[0])
 
         return numpify(annotation, keys=[support_length, question_length,
-                                         XQAPorts.token_char_offsets, answer_span])
+                                         XQAPorts.token_offsets, answer_span])
 
     def create_batch(self, annotations, is_eval, with_answers):
         """Now, we need to implement the mapping of a list of annotations to a feed dict.

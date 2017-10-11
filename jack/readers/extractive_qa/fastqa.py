@@ -69,7 +69,7 @@ class FastQAInputModule(OnlineInputModule[FastQAAnnotation]):
                 XQAPorts.correct_start_training, XQAPorts.answer2question_training,
                 XQAPorts.keep_prob, XQAPorts.is_eval,
                 # for output module
-                XQAPorts.token_char_offsets]
+                XQAPorts.token_offsets]
 
     @property
     def training_ports(self) -> List[TensorPort]:
@@ -148,7 +148,7 @@ class FastQAInputModule(OnlineInputModule[FastQAAnnotation]):
             XQAPorts.word_in_question: wiq,
             XQAPorts.keep_prob: 1.0 if is_eval else 1 - self.dropout,
             XQAPorts.is_eval: is_eval,
-            XQAPorts.token_char_offsets: offsets
+            XQAPorts.token_offsets: offsets
         }
 
         if with_answers:
@@ -165,7 +165,7 @@ class FastQAInputModule(OnlineInputModule[FastQAAnnotation]):
         # we can only numpify in here, because bucketing is not possible prior
         batch = numpify(output, keys=[XQAPorts.unique_word_chars,
                                       XQAPorts.question_words2unique, XQAPorts.support_words2unique,
-                                      XQAPorts.word_in_question, XQAPorts.token_char_offsets])
+                                      XQAPorts.word_in_question, XQAPorts.token_offsets])
         return batch
 
 
