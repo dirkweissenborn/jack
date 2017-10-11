@@ -3,6 +3,13 @@ config: './conf/jack.yaml'
 description: >
   Train and Evaluate a Machine Reader
 
+# Reader model to use, see jack/readers/implementations.py for options
+model: null
+
+# name of this reader, serves as kind of a namespace for created parameters, defaults to name of the model
+name: null
+
+# seed will not be inherited (because of sacred) so you need to set it for all child configs
 seed: 1337
 
 # Run in debug mode, in which case the training file is also used for testing
@@ -57,9 +64,6 @@ vocab_minfreq: 2
 # Should there be separate vocabularies for questions, supports, candidates and answers. This needs to be set to True for candidate-based methods
 vocab_sep: True
 
-# Reading model to use
-model: null
-
 # Optimizer, default Adam
 optimizer: 'adam'
 
@@ -108,8 +112,5 @@ output_dir: './out/'
 # path to SQLite DB for storing experiments
 experiments_db: './out/experiments.db'
 
-# dataset identifier for stream processing datasets
-use_streaming: False
-
-# dataset name used as id to hdf5 streaming pipeline
-dataset_name: null
+# loader for the dataset, ['jack', 'squad', 'snli'] are supported. For everything else convert to jtr format first.
+loader: 'jack'

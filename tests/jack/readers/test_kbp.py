@@ -2,13 +2,12 @@
 
 import tensorflow as tf
 
-from jack.core import SharedResources
 import jack.readers as readers
-from jack.data_structures import load_labelled_data
+from jack.io.load import loaders
 
 
 def test_kbp():
-    data = load_labelled_data('tests/test_data/WN18/wn18-snippet.jack.json')
+    data = loaders['jack']('tests/test_data/WN18/wn18-snippet.jack.json')
     questions = [question for question, _ in data]
 
     for model_name in ['transe', 'distmult', 'complex']:
@@ -19,8 +18,7 @@ def test_kbp():
                 'repr_dim': 10
             }
 
-            shared_resources = SharedResources(None, config)
-            reader = readers.readers['{}_reader'.format(model_name)](shared_resources)
+            reader = readers.readers['{}_reader'.format(model_name)](config)
             reader.setup_from_data(data)
 
             answers = reader(questions)

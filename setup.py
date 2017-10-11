@@ -19,6 +19,8 @@ class Install(_install):
 with open('requirements.txt', 'r') as f:
     requirements = f.readlines()
 
+tests_requirements = ['pytest', 'pytest-pep8', 'pytest-xdist', 'pytest-cov']
+
 setup(name='jack',
       version='0.1.0',
       description='Jack the Reader is a Python framework for Machine Reading',
@@ -28,7 +30,10 @@ setup(name='jack',
       test_suite='tests',
       license='MIT',
       cmdclass={'install': Install, 'develop': Install},
-      install_requires=requirements,
+      install_requires=requirements + tests_requirements,
+      extras_require={
+          'tests': tests_requirements,
+      },
       setup_requires=['pytest-runner'] + requirements,
       tests_require=requirements,
       packages=find_packages())

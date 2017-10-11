@@ -8,14 +8,13 @@ from time import strftime, localtime
 from time import time
 from typing import List, Tuple, Mapping
 
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from pylab import subplot
 from sklearn.metrics import f1_score
 
-from jack.core import JTReader, TensorPort, Answer, QASetting, FlatPorts, Ports
+from jack.core.reader import JTReader, TFReader
+from jack.core.tensorport import TensorPort, FlatPorts, Ports
+from jack.data_structures import QASetting, Answer
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,16 @@ class TrainingHook(metaclass=ABCMeta):
         raise NotImplementedError
 
 
-class TraceHook(TrainingHook):
+class TFTrainingHook(TrainingHook):
+    """Serves as Hook interface."""
+
+    @abstractmethod
+    def reader(self) -> TFReader:
+        """ Returns: JTReader instance"""
+        raise NotImplementedError
+
+
+class TraceHook(TFTrainingHook):
     """Abstract hook class, which implements an update function the summary."""
 
     def __init__(self, reader, summary_writer=None):
@@ -50,14 +58,13 @@ class TraceHook(TrainingHook):
         self.scores = {}
 
     @property
-    def reader(self) -> JTReader:
+    def reader(self) -> TFReader:
         return self._reader
 
-    def update_summary(self, sess, current_step, title, value):
+    def update_summary(self, current_step, title, value):
         """Adds summary (title, value) to summary writer object.
 
         Args:
-            sess (TensorFlow session): The TensorFlow session object.
             current_step (int): Current step in the training procedure.
             value (float): Scalar value for the message.
         """
@@ -68,6 +75,9 @@ class TraceHook(TrainingHook):
             self._summary_writer.add_summary(summary, current_step)
 
     def plot(self, ylim=None):
+        import matplotlib.patches as mpatches
+        import matplotlib.pyplot as plt
+        from pylab import subplot
         number_of_subplots=len(self.scores.keys())
         colors = ['blue', 'green', 'orange']
         patches = []
@@ -127,7 +137,7 @@ class LossHook(TraceHook):
                     self._iter[set_name], epoch, set_name)
             logger.info("Epoch {0}\tIter {1}\t{3} loss {2}".format(epoch,
                 self._iter[set_name], loss, set_name))
-            self.update_summary(self.reader.session, self._iter[set_name], "{0} loss".format(set_name), loss)
+            self.update_summary(self._iter[set_name], "{0} loss".format(set_name), loss)
             self._acc_loss[set_name] = 0
 
         ret = (0.0 if self._iter[set_name] == 0 else self._acc_loss[set_name] / self._iter[set_name])
@@ -139,7 +149,7 @@ class LossHook(TraceHook):
             loss = self._acc_loss[set_name] / self._iter_interval[set_name]
             logger.info("Epoch {}\tIter {}\t{3} Loss {}".format(epoch,
                 self._iter, loss, set_name))
-            self.update_summary(self.reader.session, self._iter[set_name], "Loss", loss)
+            self.update_summary(self._iter[set_name], "Loss", loss)
             self._epoch_loss[set_name] = 0
             self._iter_epoch[set_name] = 0
 
@@ -176,7 +186,7 @@ class ExamplesPerSecHook(TraceHook):
             diff = time() - self.t0
             speed = "%.2f" % (self.num_examples / diff)
             logger.info("Epoch {}\tIter {}\tExamples/s {}".format(str(epoch), str(self._iter), str(speed)))
-            self.update_summary(self.reader.session, self._iter, self.__tag__(), float(speed))
+            self.update_summary(self._iter, self.__tag__(), float(speed))
             self.t0 = time()
 
 
@@ -237,7 +247,7 @@ class ETAHook(TraceHook):
                 elapsed = current_time - start_time
                 eta = elapsed / progress * (1.0 - progress)
                 eta_date = strftime("%y-%m-%d %H:%M:%S", localtime(current_time + eta))
-                self.update_summary(self.reader.session, self.iter, self.__tag__() + "_" + name, float(eta))
+                self.update_summary(self.iter, self.__tag__() + "_" + name, float(eta))
 
                 return format_eta(eta), eta_date
 
@@ -260,23 +270,17 @@ class ETAHook(TraceHook):
 
 
 class EvalHook(TraceHook):
-    def __init__(self, reader: JTReader, dataset, ports: List[TensorPort],
+    def __init__(self, reader: JTReader, dataset, batch_size: int, ports: List[TensorPort],
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
-                 write_metrics_to=None, info="", side_effect=None, dataset_name=None,
-                 dataset_identifier=None):
+                 write_metrics_to=None, info="", side_effect=None):
         super(EvalHook, self).__init__(reader, summary_writer)
-
-
-        if dataset_identifier is None:
-            self._total = len(dataset)
-        else:
-            self._total = 0
-
+        self._total = len(dataset)
         self._dataset = dataset
         self._batches = None
         self._ports = ports
         self._epoch_interval = epoch_interval
         self._iter_interval = iter_interval
+        self._batch_size = batch_size
         # self.done_for_epoch = False
         self._iter = 0
         self._info = info or self.__class__.__name__
@@ -284,8 +288,6 @@ class EvalHook(TraceHook):
         self._metrics = metrics or self.possible_metrics
         self._side_effect = side_effect
         self._side_effect_state = None
-        self._dataset_identifier = dataset_identifier
-        self._dataset_name = dataset_name
 
     @abstractmethod
     def possible_metrics(self) -> List[str]:
@@ -307,19 +309,11 @@ class EvalHook(TraceHook):
         logger.info("Started evaluation %s" % self._info)
 
         if self._batches is None:
-            if self._dataset_identifier is not None:
-                self.reader.input_module.setup_from_data(self._dataset, self._dataset_name, self._dataset_identifier)
-                self._batches = self.reader.input_module.batch_generator(self._dataset, True, self._dataset_name,
-                                                                         self._dataset_identifier)
-                self._total = self.reader.input_module.batcher.num_samples
-            else:
-                self._batches = self.reader.input_module.batch_generator(self._dataset, is_eval=True,
-                                                                         dataset_name=self._dataset_name,
-                                                                         identifier=self._dataset_identifier)
+            self._batches = self.reader.input_module.batch_generator(self._dataset, self._batch_size, is_eval=True)
 
         metrics = defaultdict(lambda: list())
         for i, batch in enumerate(self._batches):
-            predictions = self.reader.model_module(self.reader.session, batch, self._ports)
+            predictions = self.reader.model_module(batch, self._ports)
             m = self.apply_metrics(predictions)
             for k in self._metrics:
                 metrics[k].append(m[k])
@@ -331,7 +325,7 @@ class EvalHook(TraceHook):
         res = "Epoch %d\tIter %d\ttotal %d" % (epoch, self._iter, self._total)
         for m in printmetrics:
             res += '\t%s: %.3f' % (m, metrics[m])
-            self.update_summary(self.reader.session, self._iter, self._info + '_' + m, metrics[m])
+            self.update_summary(self._iter, self._info + '_' + m, metrics[m])
             if self._write_metrics_to is not None:
                 with open(self._write_metrics_to, 'a') as f:
                     f.write("{0} {1} {2:.5}\n".format(datetime.now(), self._info + '_' + m,
@@ -358,11 +352,11 @@ class EvalHook(TraceHook):
 class XQAEvalHook(EvalHook):
     """This evaluation hook computes the following metrics: exact and per-answer f1 on token basis."""
 
-    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]],
+    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]], batch_size: int,
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
                  write_metrics_to=None, info="", side_effect=None, **kwargs):
         ports = [FlatPorts.Prediction.answer_span, FlatPorts.Target.answer_span, FlatPorts.Input.answer2question]
-        super().__init__(reader, dataset, ports, iter_interval, epoch_interval, metrics, summary_writer,
+        super().__init__(reader, dataset, batch_size, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
 
     @property
@@ -413,16 +407,16 @@ class XQAEvalHook(EvalHook):
 
 
 class ClassificationEvalHook(EvalHook):
-    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]],
+    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]], batch_size: int,
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
-                 write_metrics_to=None, info="", side_effect=None, dataset_name=None, dataset_identifier=None, **kwargs):
+                 write_metrics_to=None, info="", side_effect=None, **kwargs):
 
         ports = [Ports.Prediction.logits,
                  Ports.Prediction.candidate_index,
                  Ports.Target.target_index]
 
-        super().__init__(reader, dataset, ports, iter_interval, epoch_interval, metrics, summary_writer,
-                         write_metrics_to, info, side_effect, dataset_name, dataset_identifier)
+        super().__init__(reader, dataset, batch_size, ports, iter_interval, epoch_interval, metrics, summary_writer,
+                         write_metrics_to, info, side_effect)
 
     @property
     def possible_metrics(self) -> List[str]:
@@ -443,49 +437,31 @@ class ClassificationEvalHook(EvalHook):
                 return v.shape[0]
 
         acc_exact = np.sum(np.equal(labels, predictions))
-        acc_f1 = f1_score(labels, predictions, average='macro')*labels.shape[0]
+        acc_f1 = f1_score(labels, predictions, average='macro') * labels.shape[0]
 
         return {"F1_macro": acc_f1, "Accuracy": acc_exact}
 
 
 class KBPEvalHook(EvalHook):
-    """This evaluation hook computes the following metrics: exact and per-answer f1 on token basis."""
-
-    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]],
+    def __init__(self, reader: JTReader, dataset: List[Tuple[QASetting, List[Answer]]], batch_size: int,
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
                  write_metrics_to=None, info="", side_effect=None, **kwargs):
-        ports = [Ports.Input.question, Ports.Target.target_index, Ports.Prediction.logits, Ports.Input.atomic_candidates, Ports.loss]
+        ports = [Ports.loss]
         self.epoch = 0
-        super().__init__(reader, dataset, ports, iter_interval, epoch_interval, metrics, summary_writer,
+        super().__init__(reader, dataset, batch_size, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
 
     @property
     def possible_metrics(self) -> List[str]:
-        return ["exact", "epoch"]
+        return ["log_p"]
 
     @staticmethod
     def preferred_metric_and_best_score():
-            return 'epoch', [0]
+        return 'log_p', [float('-inf')]
 
     def apply_metrics(self, tensors: Mapping[TensorPort, np.ndarray]) -> Mapping[str, float]:
-        correct_answers = tensors[Ports.Target.target_index]
-        logits = tensors[Ports.Prediction.logits]
-        candidate_ids = tensors[Ports.Input.atomic_candidates]
-
-        acc_exact = 0.0
-
-        winning_indices = np.argmax(logits, axis=1)
-
-        def len_np_or_list(v):
-            if isinstance(v, list):
-                return len(v)
-            else:
-                return v.shape[0]
-
-        for i in range(len_np_or_list(winning_indices)):
-            if candidate_ids[i,winning_indices[i]]==correct_answers[i]:
-                acc_exact += 1.0
-        return {"epoch": self.epoch*len_np_or_list(winning_indices), "exact": acc_exact}
+        loss = tensors[Ports.loss]
+        return {"log_p": -np.sum(loss)}
 
     def at_test_time(self, epoch, vocab=None):
         from scipy.stats import rankdata
@@ -494,7 +470,7 @@ class KBPEvalHook(EvalHook):
         logger.info("Started test evaluation %s" % self._info)
 
         if self._batches is None:
-            self._batches = self.reader.input_module.batch_generator(self._dataset, is_eval=True)
+            self._batches = self.reader.input_module.batch_generator(self._dataset, self._batch_size, is_eval=True)
 
         def len_np_or_list(v):
             if isinstance(v, list):
@@ -508,7 +484,9 @@ class KBPEvalHook(EvalHook):
         qa_scores = []
         qa_ids = []
         for i, batch in enumerate(self._batches):
-            predictions = self.reader.model_module(self.reader.session, batch, self._ports)
+            predictions = self.reader.model_module(
+                batch, [Ports.Input.question, Ports.Target.target_index, Ports.Prediction.logits,
+                        Ports.Input.atomic_candidates])
             correct_answers = predictions[Ports.Target.target_index]
             logits = predictions[Ports.Prediction.logits]
             candidate_ids = predictions[Ports.Input.atomic_candidates]
@@ -538,8 +516,7 @@ class KBPEvalHook(EvalHook):
             ans_ranks=[]
             for a in q_answers[q]:
                 for c, cand in enumerate(q_cand_ids[q]):
-                    qa = str(q) + "\t" + str(cand)
-                    if a == cand and cand_ranks[c] <= 100:# and qa_rank[qa] <= 1000:
+                    if a == cand and cand_ranks[c] <= 100:
                         ans_ranks.append(cand_ranks[c])
             av_p = 0
             answers = 1
@@ -562,7 +539,7 @@ class KBPEvalHook(EvalHook):
         wmap = wmap / md if md else 0
         res = "Epoch %d\tIter %d\ttotal %d" % (epoch, self._iter, self._total)
         res += '\t%s: %.3f' % ("Mean Average Precision", mean_ap)
-        self.update_summary(self.reader.session, self._iter, self._info + '_' + "Mean Average Precision", mean_ap)
+        self.update_summary(self._iter, self._info + '_' + "Mean Average Precision", mean_ap)
         if self._write_metrics_to is not None:
             with open(self._write_metrics_to, 'a') as f:
                 f.write("{0} {1} {2:.5}\n".format(datetime.now(), self._info + '_' + "Mean Average Precision",
@@ -571,7 +548,7 @@ class KBPEvalHook(EvalHook):
         logger.info(res)
         res = "Epoch %d\tIter %d\ttotal %d" % (epoch, self._iter, self._total)
         res += '\t%s: %.3f' % ("Weighted Mean Average Precision", wmap)
-        self.update_summary(self.reader.session, self._iter, self._info + '_' + "Weighted Mean Average Precision", wmap)
+        self.update_summary(self._iter, self._info + '_' + "Weighted Mean Average Precision", wmap)
         if self._write_metrics_to is not None:
             with open(self._write_metrics_to, 'a') as f:
                 f.write("{0} {1} {2:.5}\n".format(datetime.now(), self._info + '_' + "Weighted Mean Average Precision",
@@ -583,42 +560,3 @@ class KBPEvalHook(EvalHook):
         self.epoch += 1
         if self._epoch_interval is not None and epoch % self._epoch_interval == 0:
             self.__call__(epoch)
-
-    def __call__(self, epoch):
-        logger.info("Started evaluation %s" % self._info)
-
-        if self._batches is None:
-            if self._dataset_identifier is not None:
-                self.reader.input_module.setup_from_data(self._dataset, self._dataset_name, self._dataset_identifier)
-                self._batches = self.reader.input_module.batch_generator(self._dataset, False, self._dataset_name,
-                                                                         self._dataset_identifier)
-                self._total = self.reader.input_module.batcher.num_samples
-            else:
-                self._batches = self.reader.input_module.batch_generator(self._dataset, is_eval=False,
-                                                                         dataset_name=self._dataset_name,
-                                                                         identifier=self._dataset_identifier)
-
-        metrics = defaultdict(lambda: list())
-        for i, batch in enumerate(self._batches):
-            predictions = self.reader.model_module(self.reader.session, batch, self._ports)
-            m = self.apply_metrics(predictions)
-            for k in self._metrics:
-                metrics[k].append(m[k])
-
-        metrics = self.combine_metrics(metrics)
-        super().add_to_history(metrics, self._iter, epoch)
-
-        printmetrics = sorted(metrics.keys())
-        res = "Epoch %d\tIter %d\ttotal %d" % (epoch, self._iter, self._total)
-        for m in printmetrics:
-            res += '\t%s: %.3f' % (m, metrics[m])
-            self.update_summary(self.reader.session, self._iter, self._info + '_' + m, metrics[m])
-            if self._write_metrics_to is not None:
-                with open(self._write_metrics_to, 'a') as f:
-                    f.write("{0} {1} {2:.5}\n".format(datetime.now(), self._info + '_' + m,
-                                                      np.round(metrics[m], 5)))
-        res += '\t' + self._info
-        logger.info(res)
-
-        if self._side_effect is not None:
-            self._side_effect_state = self._side_effect(metrics, self._side_effect_state)

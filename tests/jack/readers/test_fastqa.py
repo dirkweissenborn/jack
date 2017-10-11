@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from jack.core import SharedResources
-from jack.data_structures import load_labelled_data
-from jack.tasks.xqa.util import tokenize
+import tensorflow as tf
 
 import jack.readers as readers
+from jack.core import SharedResources
 from jack.io.embeddings.embeddings import Embeddings
-from jack.io.embeddings.vocabulary import Vocabulary
+from jack.io.load import load_jack
+from jack.readers.extractive_qa.util import tokenize
 from jack.util.vocab import Vocab
 
 
 def test_fastqa():
-    data = load_labelled_data('tests/test_data/squad/snippet_jtr.json')
+    tf.reset_default_graph()
+
+    data = load_jack('tests/test_data/squad/snippet_jtr.json')
     questions = []
     # fast qa must be initialized with existing embeddings, so we create some
     vocab = dict()
@@ -21,7 +23,6 @@ def test_fastqa():
         for t in tokenize(question.question):
             if t not in vocab:
                 vocab[t] = len(vocab)
-    vocab = Vocabulary(vocab)
     embeddings = Embeddings(vocab, np.random.random([len(vocab), 10]))
 
     # we need a vocabulary (with embeddings for our fastqa_reader, but this is not always necessary)
@@ -33,7 +34,7 @@ def test_fastqa():
 
     # create/setup reader
     shared_resources = SharedResources(vocab, config)
-    fastqa_reader = readers.readers["fastqa_reader"](shared_resources)
+    fastqa_reader = readers.fastqa_reader(shared_resources)
     fastqa_reader.setup_from_data(data)
 
     answers = fastqa_reader(questions)

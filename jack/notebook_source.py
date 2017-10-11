@@ -2,12 +2,12 @@ import re
 
 from jack.core import *
 from jack.io.embeddings import Vocabulary, Embeddings
-from jack.tasks.xqa.shared import XQAPorts, XQAOutputModule
-from jack.tasks.xqa.util import prepare_data, stack_and_pad
+from jack.readers.extractive_qa.shared import XQAPorts, XQAOutputModule
+from jack.readers.extractive_qa.util import prepare_data, stack_and_pad
+from jack.readers.extractive_qa.util import tokenize
 from jack.tf_fun.rnn import birnn_with_projection
 from jack.util import tfutil
 from jack.util.map import numpify
-from jack.tasks.xqa.util import tokenize
 
 _tokenize_pattern = re.compile('\w+|[^\w\s]')
 
@@ -192,7 +192,7 @@ class MyInputModule(OnlineInputModule):
 
     def create_batch(self, annotations, is_eval, with_answers):
         """Now, we need to implement the mapping of a list of annotations to a feed dict.
-        
+
         Because our annotations already are dicts mapping TensorPorts to numpy
         arrays, we only need to do padding here.
         """
@@ -213,7 +213,7 @@ and outputs required by hte output module.
 
 
 
-class MyModelModule(SimpleModelModule):
+class MyModelModule(TFModelModule):
 
     # We'll define a constant here for the hidden size. You could also pass this
     # as part of the `shared_config.config` dict.
@@ -377,6 +377,7 @@ The `build_vocab()` function builds a random embedding matrix. Normally,
 we could load pre-trained embeddings here, such as GloVe.
 
 """
+
 
 def build_vocab(questions):
     """Build a vocabulary of random vectors."""

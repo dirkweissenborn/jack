@@ -1,15 +1,15 @@
 """Smoke test: train all readers for one iteration & run inference."""
 from functools import partial
 
-from jack import readers
-from jack.core import SharedResources
-from jack.data_structures import QASetting, Answer
-from jack.io.embeddings import Vocabulary, Embeddings
-from jack.tasks.xqa.util import tokenize
-from jack.util.vocab import Vocab
-
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+from jack import readers
+from jack.core.shared_resources import SharedResources
+from jack.data_structures import QASetting, Answer
+from jack.io.embeddings import Embeddings
+from jack.readers.extractive_qa.util import tokenize
+from jack.util.vocab import Vocab
 
 
 def teardown_function(_):
@@ -24,7 +24,6 @@ def build_vocab(questions):
         for t in tokenize(question.question):
             if t not in vocab:
                 vocab[t] = len(vocab)
-    vocab = Vocabulary(vocab)
     embeddings = Embeddings(vocab, np.random.random([len(vocab), 10]))
 
     vocab = Vocab(emb=embeddings, init_from_embeddings=True)
@@ -48,18 +47,17 @@ def smoke_test(reader_name):
                                                                 "repr_dim_input": 10,
                                                                 "dropout": 0.5,
                                                                 "batch_size": 1})
-
+    tf.reset_default_graph()
     reader = readers.readers[reader_name](shared_resources)
 
-    reader.train(tf.train.AdamOptimizer(), data_set, max_epochs=1)
+    reader.train(tf.train.AdamOptimizer(), data_set, batch_size=1, max_epochs=1)
 
     answers = reader(questions)
 
     assert answers, "{} should produce answers".format(reader_name)
 
 
-# TODO: Make streaming work as well.
-BLACKLIST = ["cbilstm_snli_streaming_reader"]
+BLACKLIST = []
 READERS = [r for r in readers.readers.keys()
            if r not in BLACKLIST]
 
