@@ -93,17 +93,17 @@ def prepare_data(qa_setting: QASetting,
 
         for a in answers:
             document_token_offsets = [offset for doc_idx, offset in token_offsets
-                                      if doc_idx == a.span[0]]
+                                      if doc_idx == a.doc_idx]
 
             start = 0
-            while start < len(document_token_offsets) and document_token_offsets[start] < a.span[1]:
+            while start < len(document_token_offsets) and document_token_offsets[start] < a.span[0]:
                 start += 1
 
             if start == len(document_token_offsets):
                 continue
 
             end = start
-            while end + 1 < len(document_token_offsets) and document_token_offsets[end + 1] < a.span[2]:
+            while end + 1 < len(document_token_offsets) and document_token_offsets[end + 1] < a.span[1]:
                 end += 1
             if (start, end) not in answer_spans:
                 answer_spans.append((start, end))
