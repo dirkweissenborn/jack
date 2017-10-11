@@ -23,8 +23,6 @@ class Answer:
             support documents. The span starts at `start` and ends at `end` (exclusive).
             score: the score a model associates with this answer.
         """
-        assert len(span) == 2, "span should be (char_start, char_end) tuple"
-
         self.score = score
         self.span = span
         self.doc_idx = doc_idx
