@@ -7,6 +7,7 @@ from typing import NamedTuple
 import spacy
 
 from jack.core import *
+from jack.core.tensorflow import TFModelModule
 from jack.readers.extractive_qa.fastqa import XQAPorts
 from jack.readers.extractive_qa.util import prepare_data
 from jack.tf_util import misc

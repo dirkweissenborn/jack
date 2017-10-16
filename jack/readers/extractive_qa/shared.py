@@ -4,6 +4,7 @@ This file contains reusable modules for extractive QA models and ports
 from typing import NamedTuple
 
 from jack.core import *
+from jack.core.tensorflow import TFModelModule
 from jack.readers.extractive_qa.util import prepare_data
 from jack.tf_util.xqa import xqa_min_crossentropy_loss
 from jack.util import preprocessing
