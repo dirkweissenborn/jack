@@ -5,9 +5,6 @@ import os
 import random
 import shutil
 
-import tensorflow as tf
-import torch
-
 from jack import readers
 from jack.core.tensorflow import TFReader
 from jack.core.torch import PyTorchReader
@@ -24,6 +21,8 @@ def train(reader, train_data, test_data, dev_data, configuration: dict, debug=Fa
 
 
 def train_tensorflow(reader, train_data, test_data, dev_data, configuration: dict, debug=False):
+    import tensorflow as tf
+
     seed = configuration.get('seed')
 
     # make everything deterministic
@@ -113,6 +112,7 @@ def train_tensorflow(reader, train_data, test_data, dev_data, configuration: dic
 
 
 def train_pytorch(reader, train_data, test_data, dev_data, configuration: dict, debug=False):
+    import torch
     seed = configuration.get('seed')
 
     # make everything deterministic
@@ -157,6 +157,7 @@ def train_pytorch(reader, train_data, test_data, dev_data, configuration: dict, 
 
     sw = None
     if tensorboard_folder is not None:
+        import tensorflow as tf
         if os.path.exists(tensorboard_folder):
             shutil.rmtree(tensorboard_folder)
         sw = tf.summary.FileWriter(tensorboard_folder)
