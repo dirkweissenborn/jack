@@ -8,7 +8,7 @@ from jack.core import *
 from jack.readers.extractive_qa.shared import XQAPorts, AbstractXQAModelModule
 from jack.tf_util import misc
 from jack.tf_util.dropout import fixed_dropout
-from jack.tf_util.embedding import conv_char_embedding_alt
+from jack.tf_util.embedding import conv_char_embedding
 from jack.tf_util.highway import highway_network
 from jack.tf_util.rnn import birnn_with_projection
 
@@ -86,7 +86,7 @@ class FastQAModule(AbstractXQAModelModule):
 
             if with_char_embeddings:
                 # compute combined embeddings
-                [char_emb_question, char_emb_support] = conv_char_embedding_alt(
+                [char_emb_question, char_emb_support] = conv_char_embedding(
                     shared_vocab_config.char_vocab, size, unique_word_chars, unique_word_char_length,
                     [question_words2unique, support_words2unique])
 
@@ -129,7 +129,7 @@ class FastQAModule(AbstractXQAModelModule):
                 emb_question.set_shape([None, None, size])
                 emb_support.set_shape([None, None, size])
 
-            # variational dropout
+            # dropout
             dropout_shape = tf.unstack(tf.shape(emb_question))
             dropout_shape[1] = 1
 
