@@ -86,7 +86,7 @@ class FastQAPyTorchModule(nn.Module):
                 unique_word_chars, unique_word_char_length,
                 question_words2unique, support_words2unique,
                 word_in_question, correct_start, answer2question,
-                keep_prob: float, is_eval: bool):
+                keep_prob, is_eval: bool):
         """fast_qa model
 
         Args:
@@ -149,8 +149,9 @@ class FastQAPyTorchModule(nn.Module):
             emb_support = self._embedding_highway(emb_support)
 
         # dropout
-        emb_question = functional.dropout(emb_question, 1.0 - keep_prob)
-        emb_support = functional.dropout(emb_support, 1.0 - keep_prob)
+        dropout = self._shared_resources.config["dropout"]
+        emb_question = functional.dropout(emb_question, dropout, training=not is_eval)
+        emb_support = functional.dropout(emb_support, dropout, training=not is_eval)
 
         # extend embeddings with features
         emb_question_ext = torch.cat([emb_question, question_features], 2)
