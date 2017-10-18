@@ -20,3 +20,4 @@ pytest-pep8
 pytest-xdist
 pytest-cov
 codecov
+torch
