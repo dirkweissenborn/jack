@@ -157,8 +157,8 @@ class FastQAPyTorchModule(nn.Module):
 
         # encode question and support
         # [B, L, 2 * size]
-        encoded_question = self._bilstm(emb_question_ext, question_length)[0]
-        encoded_support = self._bilstm(emb_support_ext, support_length)[0]
+        encoded_question = self._bilstm(emb_question_ext)[0]
+        encoded_support = self._bilstm(emb_support_ext)[0]
 
         # [B, L, size]
         encoded_support = F.tanh(F.linear(encoded_support, self._support_projection))
