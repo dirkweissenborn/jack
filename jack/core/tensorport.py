@@ -286,15 +286,18 @@ class Ports:
                                  "Represents answer as a (doc_idx, start, end) span", "[A, 3]")
 
         # generative QA
-        generative_symbol_scores = TensorPort(tf.int32, [None, None, None], "symbol_scores",
-                                              "Represents symbol scores for each possible "
-                                              "sequential answer given during training",
-                                              "[A, max_num_tokens, vocab_len]")
+        logits_3D = TensorPort(tf.int32, [None, None, None], "symbol_scores",
+                               "Represents symbol scores for each possible "
+                               "sequential answer given during training",
+                               "[A, max_num_tokens, vocab_len]")
 
-        generative_symbols = TensorPort(tf.int32, [None, None], "symbol_prediction",
-                                        "Represents symbol sequence for each possible "
-                                        "answer target_indexpredicted by the model",
-                                        "[A, max_num_tokens]")
+        symbols = TensorPort(tf.int32, [None, None], "symbol_prediction",
+                             "Represents symbol sequence for each possible "
+                             "answer target_indexpredicted by the model",
+                             "[A, max_num_tokens]")
+
+        seq_length = TensorPort(tf.int32, [None, None], "seq_length",
+                                "length of predicted symbol sequence", "[A]")
 
     class Target:
         candidate_1hot = TensorPort(tf.float32, [None, None], "candidate_targets",
