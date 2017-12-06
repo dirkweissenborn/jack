@@ -10,9 +10,9 @@ assertion_sources: ['conceptnet']
 
 seed: 1337
 
-model: 'predicate_generator_fixed'
+reader: 'predicate_generator_fixed'
 
-model_dir: './predicate_generator_fixed'
+reader_dir: './predicate_generator_fixed'
 
 loader: assertion
 

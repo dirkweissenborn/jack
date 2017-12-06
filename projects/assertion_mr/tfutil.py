@@ -1,11 +1,11 @@
 import tensorflow as tf
 
-from jack.tf_util import misc
-from jack.tf_util import rnn
-from jack.tf_util.embedding import conv_char_embedding
+from jack.tfutil import misc
+from jack.tfutil import modular_encoder
+from jack.tfutil.embedding import conv_char_embedding
 
 
-def embedding_refinement(size, word_embeddings, reading_sequence, reading_sequence_2_batch,
+def embedding_refinement(size, word_embeddings, sequence_module, reading_sequence, reading_sequence_2_batch,
                          reading_sequence_lengths, word2lemma, unique_word_chars=None,
                          unique_word_char_length=None, is_eval=False, sequence_indices=None, num_sequences=4,
                          only_refine=False, keep_prob=1.0, batch_size=None, with_char_embeddings=False, num_chars=0):
@@ -57,11 +57,8 @@ def embedding_refinement(size, word_embeddings, reading_sequence, reading_sequen
                 mode_feature = tf.constant([[one_hot]], tf.float32)
                 mode_feature = tf.tile(mode_feature, tf.stack([batch_size, max_length, 1]))
                 encoded = tf.concat([encoded, mode_feature], 2)
-                with tf.variable_scope("RNN"):
-                    encoded = rnn.fused_birnn(
-                        fused_rnn, encoded, sequence_length=length, dtype=tf.float32, time_major=False)[0]
-                    encoded = tf.concat(encoded, 2)
-                encoded = tf.layers.dense(encoded, size, name="projected")
+                encoded = modular_encoder.modular_encoder(
+                    sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size, is_eval)[0]['text']
 
                 mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
                 encoded = encoded * tf.expand_dims(mask, 2)

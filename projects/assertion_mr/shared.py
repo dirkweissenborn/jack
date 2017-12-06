@@ -5,40 +5,39 @@ import shelve
 import tensorflow as tf
 from nltk.corpus import stopwords
 
-from jack.core import TensorPort, FlatPorts, Ports
-from jack.readers.extractive_qa.shared import ParameterTensorPorts
+from jack.core import TensorPort, Ports
 
 
 class AssertionMRPorts:
     # When feeding embeddings directly
-    question_length = FlatPorts.Input.question_length
-    support_length = FlatPorts.Input.support_length
+    question_length = Ports.Input.question_length
+    support_length = Ports.Input.support_length
 
     # but also ids, for char-based embeddings
     question = Ports.Input.question
     support = Ports.Input.support
 
-    word_char_length = TensorPort(tf.int32, [None], "char_length", "words length", "[U]")
+    word_char_length = TensorPort(tf.int32, [None], "word_char_length", "words length", "[U]")
 
     token_char_offsets = TensorPort(tf.int32, [None, None], "token_char_offsets",
                                     "Character offsets of tokens in support.", "[S, support_length]")
 
-    keep_prob = ParameterTensorPorts.keep_prob
-    is_eval = ParameterTensorPorts.is_eval
+    keep_prob = Ports.keep_prob
+    is_eval = Ports.is_eval
 
     word_embeddings = TensorPort(tf.float32, [None, None], "word_embeddings",
                                  "Embeddings only for words occuring in batch.", "[None, N]")
 
     assertion_lengths = TensorPort(tf.int32, [None], "assertion_lengths", "Length of assertion.", "[R]")
 
-    assertions = TensorPort(tf.int32, [None, None], "assertion2unique",
+    assertions = TensorPort(tf.int32, [None, None], "assertions",
                             "Represents batch dependent assertion word ids.",
                             "[R, L]")
     assertion2question = TensorPort(tf.int32, [None], "assertion2question", "Question idx per assertion", "[R]")
 
-    word2lemma = TensorPort(tf.int32, [None], "uniqueword2uniquelemma", "Lemma idx per word", "[U]")
+    word2lemma = TensorPort(tf.int32, [None], "word2lemma", "Lemma idx per word", "[U]")
 
-    word_chars = TensorPort(tf.int32, [None, None], "chars", "Represents words as sequence of chars",
+    word_chars = TensorPort(tf.int32, [None, None], "word_chars", "Represents words as sequence of chars",
                             "[U, max_num_chars]")
 
     question_arg_span = TensorPort(tf.int32, [None, 2], "question_arg_span",

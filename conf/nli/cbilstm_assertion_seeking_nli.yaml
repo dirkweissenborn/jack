@@ -8,11 +8,18 @@ assertion_dir: '/data/assertion_shelve'
 assertion_limit: 20
 assertion_sources: ['conceptnet']
 
+reading_module:
+  - input: 'text'
+    module: 'lstm'
+    with_projection: True
+    activation: relu
+
+
 seed: 1337
 
-model: 'cbilstm_nli_assertion_reader'
+reader: 'cbilstm_nli_assertion_seeking_generating_reader'
 
-model_dir: './cbilstm_nli_assertion_reader'
+reader_dir: './cbilstm_nli_assertion_seeking_generating_reader'
 
 loader: snli
 
@@ -29,6 +36,7 @@ with_char_embeddings: True
 repr_dim: 300
 epochs: 20
 dropout: 0.2
-batch_size: 128
+batch_size: 16
 
-train_residual: False
+generator: null
+name: null

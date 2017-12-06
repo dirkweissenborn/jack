@@ -198,3 +198,89 @@ def transe_reader(resources_or_conf: Union[dict, SharedResources] = None):
     model_module = KnowledgeGraphEmbeddingModelModule(shared_resources, model_name='TransE')
     output_module = KnowledgeGraphEmbeddingOutputModule()
     return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+### Assertion related models ###
+
+@extractive_qa_reader
+def modular_assertion_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    """Creates a FastQA model as described in https://arxiv.org/abs/1703.04816 (extractive qa model)."""
+    from projects.assertion_mr.qa.shared import XQAAssertionInputModule
+    from jack.readers.extractive_qa.shared import XQAOutputModule
+    from projects.assertion_mr.qa.shared import ModularAssertionQAModel
+    shared_resources = create_shared_resources(resources_or_conf)
+
+    input_module = XQAAssertionInputModule(shared_resources)
+    model_module = ModularAssertionQAModel(shared_resources)
+    output_module = XQAOutputModule(shared_resources)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@__reader
+def predicate_generator(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.assertion_generation import PredicateGenerationInputModule, \
+        RNNPredicateGenerationModelModule, PredicateGenerationOutputModule, PredicateGenEvalHook
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = PredicateGenerationInputModule(shared_resources)
+    model_module = RNNPredicateGenerationModelModule(shared_resources)
+    output_module = PredicateGenerationOutputModule(shared_resources)
+    eval_hooks.setdefault('predicate_generator', PredicateGenEvalHook)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@__reader
+def predicate_generator_fixed(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.assertion_generation import PredicateGenerationInputModule, \
+        FixedPredicateGenerationModelModule, PredicateGenerationOutputModule, PredicateClassificationEvalHook
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = PredicateGenerationInputModule(shared_resources)
+    model_module = FixedPredicateGenerationModelModule(shared_resources)
+    output_module = PredicateGenerationOutputModule(shared_resources)
+    eval_hooks.setdefault('predicate_generator_fixed', PredicateClassificationEvalHook)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@nli_reader
+def cbilstm_simple_nli_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule, SimpleNLIModel
+    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = MultipleChoiceAssertionInputModule(shared_resources)
+    model_module = SimpleNLIModel(shared_resources)
+    output_module = SimpleMCOutputModule(shared_resources)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@nli_reader
+def cbilstm_nli_assertion_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule, NLIAssertionModel
+    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = MultipleChoiceAssertionInputModule(shared_resources)
+    model_module = NLIAssertionModel(shared_resources)
+    output_module = SimpleMCOutputModule(shared_resources)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@nli_reader
+def cbilstm_nli_assertion_seeking_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule
+    from projects.assertion_mr.nli.assertion_seeking import NLIAssertionSeekingModel
+    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = MultipleChoiceAssertionInputModule(shared_resources)
+    model_module = NLIAssertionSeekingModel(shared_resources)
+    output_module = SimpleMCOutputModule(shared_resources)
+    return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@nli_reader
+def cbilstm_nli_assertion_seeking_generating_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.assertion_seek_and_generate import MultipleChoiceAssertionInputModuleWithPredicates
+    from projects.assertion_mr.nli.assertion_seek_and_generate import NLIAssertionSeekingAndGeneratingModel
+    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = MultipleChoiceAssertionInputModuleWithPredicates(shared_resources)
+    model_module = NLIAssertionSeekingAndGeneratingModel(shared_resources)
+    output_module = SimpleMCOutputModule(shared_resources)
+    return TFReader(shared_resources, input_module, model_module, output_module)

@@ -2,13 +2,13 @@ from typing import List
 
 import tensorflow as tf
 
-from jack.core import TensorPort, Ports, SharedResources
+from jack.core import TensorPort, Ports, SharedResources, TensorPortTensors
 from jack.core.tensorflow import TFModelModule
-from jack.tf_util import segment
-from jack.tf_util.rnn import birnn_with_projection
-from projects.assertion_mr.multiple_choice_modules import NLIAssertionModel, nli_model
+from jack.tfutil import segment
+from jack.tfutil import sequence_encoder
+from projects.assertion_mr.nli.shared import NLIAssertionModel, nli_model
 from projects.assertion_mr.shared import AssertionMRPorts
-from projects.assertion_mr.tf_util import embedding_refinement, embed_span_pairs_uniq
+from projects.assertion_mr.tfutil import embedding_refinement, embed_span_pairs_uniq
 
 
 class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
@@ -42,25 +42,40 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
                 AssertionMRPorts.assertion_selection_mask,
                 Ports.Target.target_index]
 
-    def create_output(self, shared_resources, question_length, support_length,
-                      word_chars, word_char_length,
-                      question_words, support_words2uniq, is_eval,
-                      word_embeddings, assertion_length, assertion2question, assertion_words,
-                      question_arg_span, support_arg_span,
-                      assertion2question_arg_span, assertion2support_arg_span, word2lemma):
-        with tf.variable_scope("mc_assertion", initializer=tf.contrib.layers.xavier_initializer()):
+    def create_output(self, shared_resources, input_tensors):
+        with tf.variable_scope('assertion_reader') as vs:
+            tensors = TensorPortTensors(input_tensors)
+
+            question_length = tensors.question_length
+            support_length = tensors.support_length
+            word_chars = tensors.word_chars
+            word_char_length = tensors.word_char_length
+            question = tensors.question
+            support = tensors.support
+            is_eval = tensors.is_eval
+            word_embeddings = tensors.word_embeddings
+            assertion_length = tensors.assertion_length
+            assertion2question = tensors.assertion2question
+            assertions = tensors.assertions
+            question_arg_span = tensors.question_arg_span
+            support_arg_span = tensors.support_arg_span
+            assertion2question_arg_span = tensors.assertion2question_arg_span
+            assertion2support_arg_span = tensors.assertion2support_arg_span
+            word2lemma = tensors.word2lemma
+
             input_size = shared_resources.config["repr_dim_input"]
             size = shared_resources.config["repr_dim"]
-            with_char_embeddings = shared_resources.config.geT("with_char_embeddings", False)
+            with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
             batch_size = tf.shape(question_length)[0]
+            reading_encoder_config = shared_resources.config['reading_module']
             word_embeddings.set_shape([None, input_size])
 
-            reading_sequence = [support_words2uniq, question_words]
+            reading_sequence = [support, question]
             reading_sequence_lengths = [support_length, question_length]
             reading_sequence_2_batch = [None, None]
 
             new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
-                shared_resources, word_embeddings,
+                shared_resources, word_embeddings, reading_encoder_config,
                 reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
                 word2lemma, word_chars, word_char_length, is_eval,
                 with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))
@@ -78,18 +93,13 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
             support_arg_span = tf.gather(support_arg_span, assertion2support_arg_span)
             # argument selection from policy net
             emb_question = tf.concat([
-                tf.nn.embedding_lookup(word_embeddings, question_words), tf.stop_gradient(emb_question)], 2)
-            # emb_question = tf.nn.embedding_lookup(word_embeddings, question_words2uniq)
+                tf.nn.embedding_lookup(word_embeddings, question), tf.stop_gradient(emb_question)], 2)
+            # emb_question = tf.nn.embedding_lookup(word_embeddings, question2uniq)
             emb_support = tf.concat([
-                tf.nn.embedding_lookup(word_embeddings, support_words2uniq), tf.stop_gradient(emb_support)], 2)
-            # emb_support = tf.nn.embedding_lookup(word_embeddings, support_words2uniq)
-            q_outputs = birnn_with_projection(
-                size, tf.contrib.rnn.LSTMBlockFusedCell(size), emb_question, question_length,
-                rnn_scope="q_rnn_selection", projection_scope="q_rnn_selection_projection")
-
-            s_outputs = birnn_with_projection(
-                size, tf.contrib.rnn.LSTMBlockFusedCell(size), emb_support, support_length,
-                rnn_scope="s_rnn_selection", projection_scope="s_rnn_selection_projection")
+                tf.nn.embedding_lookup(word_embeddings, support), tf.stop_gradient(emb_support)], 2)
+            # emb_support = tf.nn.embedding_lookup(word_embeddings, support)
+            q_outputs = sequence_encoder.bi_lstm(size, emb_question, question_length, name="q_rnn_selection")
+            s_outputs = sequence_encoder.bi_lstm(size, emb_support, support_length, name="s_rnn_selection")
 
             # [Args_q, size]
             emb_spans_q, emb_spans_s, assertion2pair, pairs2question = embed_span_pairs_uniq(
@@ -181,22 +191,22 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
 
                     sampled_assertion_length = gather_selected(assertion_length)
                     max_assertion_length = tf.reduce_max(sampled_assertion_length)
-                    sampled_assertion_words2uniq = gather_selected(assertion_words)[:, :max_assertion_length]
+                    sampled_assertions = gather_selected(assertions)[:, :max_assertion_length]
 
                     sampled_embeddings = tf.gather(
                         tf.reshape(new_word_embeddings, [batch_size, -1, size]), sampled_questions2questions)
                     sampled_embeddings = tf.reshape(sampled_embeddings, [-1, size])
                     assertion_refined_embeddings, _, offsets = embedding_refinement(
-                        size, sampled_embeddings,
-                        [sampled_assertion_words2uniq], [sampled_assertion2question],
+                        size, sampled_embeddings, reading_encoder_config,
+                        [sampled_assertions], [sampled_assertion2question],
                         [sampled_assertion_length], word2lemma, word_chars,
                         word_char_length, is_eval, only_refine=True, sequence_indices=[2])
 
-                    sampled_questions = tf.gather(question_words, sampled_questions2questions) + offsets
+                    sampled_questions = tf.gather(question, sampled_questions2questions) + offsets
                     sampled_question_length = tf.gather(question_length, sampled_questions2questions)
                     sampled_max_question_length = tf.reduce_max(sampled_question_length)
 
-                    sampled_supports = tf.gather(support_words2uniq, sampled_questions2questions) + offsets
+                    sampled_supports = tf.gather(support, sampled_questions2questions) + offsets
                     sampled_support_length = tf.gather(support_length, sampled_questions2questions)
                     sampled_max_support_length = tf.reduce_max(sampled_support_length)
 
@@ -205,7 +215,7 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
                     emb_support = tf.nn.embedding_lookup(assertion_refined_embeddings,
                                                          sampled_supports[:, :sampled_max_support_length])
 
-                    tf.get_variable_scope().reuse_variables()
+                    vs.reuse_variables()
 
                     logits = nli_model(size, shared_resources.config["answer_size"],
                                        emb_question, sampled_question_length, emb_support, sampled_support_length)
@@ -238,14 +248,15 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
         tf.summary.scalar("selected_pair_fraction", selected_pair_fraction)
         tf.summary.scalar("fraction_early_cut", fraction_is_stop)
 
-        return (all_logits[-1], tf.argmax(all_logits[-1], 1), tf.stack(all_logits), tf.stack(log_ps),
-                tf.stack(selection_mask), tf.stack(all_selected_assertions))
+        return TensorPort.to_mapping(self.output_ports, (
+            all_logits[-1], tf.argmax(all_logits[-1], 1), tf.stack(all_logits), tf.stack(log_ps),
+            tf.stack(selection_mask), tf.stack(all_selected_assertions)))
 
-    def create_training_output(self, shared_resources: SharedResources,
-                               logits_3D, policy_log_probs, selection_mask, labels):
-        labels_3D = tf.tile(tf.expand_dims(labels, 0), [tf.shape(logits_3D)[0], 1])
-        weights = tf.to_float(selection_mask)
-        losses = tf.losses.sparse_softmax_cross_entropy(logits=logits_3D, labels=labels_3D,
+    def create_training_output(self, shared_resources: SharedResources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+        labels_3D = tf.tile(tf.expand_dims(tensors.target_index, 0), [tf.shape(tensors.logits_3D)[0], 1])
+        weights = tf.to_float(tensors.selection_mask)
+        losses = tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits_3D, labels=labels_3D,
                                                         reduction=tf.losses.Reduction.NONE)
         loss = tf.reduce_mean(losses[-1])
         neg_gain = tf.stop_gradient(losses[1:] - losses[:-1])
@@ -255,7 +266,7 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
             neg_gain, tf.tile(tf.reshape(baseline, [1, 1]), tf.shape(neg_gain)), weights=weights[:-1])
 
         policy_loss = tf.reduce_mean(tf.reduce_sum(
-            policy_log_probs * tf.stop_gradient(neg_gain - baseline) * weights[:-1], axis=0))
+            tensors.policy_log_probs * tf.stop_gradient(neg_gain - baseline) * weights[:-1], axis=0))
 
         weight_sum = tf.maximum(1.0, tf.reduce_sum(weights[1:]))
         tf.summary.scalar("gain_per_concept_pair", -tf.reduce_sum(neg_gain) / weight_sum)
@@ -264,11 +275,10 @@ class NLIAssertionSeekingModel(NLIAssertionModel, TFModelModule):
         tf.summary.scalar("cumulative_gain", -tf.reduce_mean(tf.reduce_sum(neg_gain, axis=0)))
         tf.summary.scalar("baseline_gain", -baseline)
         tf.summary.scalar("policy_prob",
-                          tf.reduce_sum(tf.exp(policy_log_probs) * weights[:-1]) /
+                          tf.reduce_sum(tf.exp(tensors.policy_log_probs) * weights[:-1]) /
                           tf.maximum(1.0, tf.reduce_sum(weights[:-1])))
         tf.summary.scalar("loss", loss)
         if shared_resources.config.get('only_policy'):
-            return policy_loss + baseline_loss,
+            return {Ports.loss: policy_loss + baseline_loss}
         else:
-            return loss + policy_loss + baseline_loss,
-
+            return {Ports.loss: loss + policy_loss + baseline_loss}

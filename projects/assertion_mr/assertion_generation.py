@@ -4,9 +4,9 @@ import random
 import numpy as np
 import tensorflow as tf
 
-from jack.core import OnlineInputModule, TensorPort, Ports, FlatPorts, OutputModule, Answer
+from jack.core import OnlineInputModule, TensorPort, Ports, OutputModule, Answer, TensorPortTensors
 from jack.core.tensorflow import TFModelModule
-from jack.tf_util.embedding import conv_char_embedding_multi_filter
+from jack.tfutil.embedding import conv_char_embedding_multi_filter
 from jack.util.hooks import EvalHook, ClassificationEvalHook
 from jack.util.map import numpify
 
@@ -57,7 +57,7 @@ class PredicateGenEvalHook(EvalHook):
     def __init__(self, reader, dataset, batch_size: int,
                  iter_interval=None, epoch_interval=1, metrics=None, summary_writer=None,
                  write_metrics_to=None, info="", side_effect=None, **kwargs):
-        ports = [FlatPorts.Prediction.logits_3D, PredicateGenPorts.predicate_symbols,
+        ports = [Ports.Prediction.logits_3D, PredicateGenPorts.predicate_symbols,
                  PredicateGenPorts.predicate_length]
         super().__init__(reader, dataset, batch_size, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
@@ -71,7 +71,7 @@ class PredicateGenEvalHook(EvalHook):
         return 'Exact', [0.0]
 
     def apply_metrics(self, tensors):
-        logits = tensors.get(FlatPorts.Prediction.logits_3D)
+        logits = tensors.get(Ports.Prediction.logits_3D)
         symbols = tensors[PredicateGenPorts.predicate_symbols]
         lengths = tensors[PredicateGenPorts.predicate_length]
         log_probs = np.log(_np_softmax(logits) + 1e-6)
@@ -247,7 +247,7 @@ class PredicateGenerationOutputModule(OutputModule):
 
     @property
     def input_ports(self):
-        return [FlatPorts.Prediction.symbols, FlatPorts.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
+        return [Ports.Prediction.symbols, Ports.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
 
     def __call__(self, inputs, symbols, lengths, reversed_args_probs):
         answer = []
@@ -264,7 +264,7 @@ class PredicateGenerationOutputModule(OutputModule):
 class RNNPredicateGenerationModelModule(TFModelModule):
     @property
     def training_input_ports(self):
-        return [FlatPorts.Prediction.logits_3D, PredicateGenPorts.predicate_symbols,
+        return [Ports.Prediction.logits_3D, PredicateGenPorts.predicate_symbols,
                 PredicateGenPorts.predicate_length, PredicateGenPorts.reversed_args_logits,
                 PredicateGenPorts.reversed_args_target]
 
@@ -278,16 +278,28 @@ class RNNPredicateGenerationModelModule(TFModelModule):
 
     @property
     def output_ports(self):
-        return [FlatPorts.Prediction.logits_3D, FlatPorts.Prediction.symbols,
-                FlatPorts.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
+        return [Ports.Prediction.logits_3D, Ports.Prediction.symbols,
+                Ports.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
 
     @property
     def training_output_ports(self):
         return [Ports.loss]
 
-    def create_output(self, shared_resources, predicate_symbols, predicate_length,
-                      arg1, arg_len1, arg_chars1, arg_chars_len1,
-                      arg2, arg_len2, arg_chars2, arg_chars_len2, is_eval):
+    def create_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+
+        arg1 = tensors.arg1
+        arg_len1 = tensors.arg_len1
+        arg_chars1 = tensors.arg_chars1
+        arg_chars_len1 = tensors.arg_chars_len1
+        arg2 = tensors.arg2
+        arg_len2 = tensors.arg_len2
+        arg_chars2 = tensors.arg_chars2
+        arg_chars_len2 = tensors.arg_chars_len2
+        is_eval = tensors.is_eval
+        predicate_symbols = tensors.predicate_symbols
+        predicate_length = tensors.predicate_length
+
         size = shared_resources.config['repr_dim']
         with_char_embeddings = shared_resources.config.get('with_char_embeddings', False)
         max_conv_width = shared_resources.config.get('max_conv_width', 9)
@@ -300,19 +312,20 @@ class RNNPredicateGenerationModelModule(TFModelModule):
             arg1, arg_len1, arg_chars1, arg_chars_len1,
             arg2, arg_len2, arg_chars2, arg_chars_len2, is_eval)
 
-
-    def create_training_output(self, shared_resources, logits_3D, predicate_symbols, predicate_length,
-                               arg_ordering_logits, reversed_args):
-        rev_predicate_symbols = tf.reverse_sequence(predicate_symbols, predicate_length, 1, 0)
+    def create_training_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+        rev_predicate_symbols = tf.reverse_sequence(input_tensors.predicate_symbols, input_tensors.predicate_length, 1,
+                                                    0)
         eos = tf.constant(len(shared_resources.predicate_vocab) + 1, tf.int32, [1, 1])
-        eos = tf.tile(eos, [tf.shape(predicate_length)[0], 1])
+        eos = tf.tile(eos, [tf.shape(tensors.predicate_length)[0], 1])
         rev_predicate_symbols = tf.concat([eos, rev_predicate_symbols], axis=1)
-        predicate_length += 1
+        predicate_length = tensors.predicate_length + 1
         predicate_symbols = tf.reverse_sequence(rev_predicate_symbols, predicate_length, 1, 0)
         weights = tf.sequence_mask(predicate_length, dtype=tf.float32)
-        seq_loss = tf.losses.sparse_softmax_cross_entropy(labels=predicate_symbols, logits=logits_3D, weights=weights)
+        seq_loss = tf.losses.sparse_softmax_cross_entropy(labels=predicate_symbols, logits=tensors.logits_3D,
+                                                          weights=weights)
         # seq_loss = multi_class_hinge_loss(labels=predicate_symbols, logits=logits_3D, weights=weights)
-        arg_order_loss = tf.losses.log_loss(reversed_args, tf.sigmoid(arg_ordering_logits))
+        arg_order_loss = tf.losses.log_loss(tensors.reversed_args, tf.sigmoid(tensors.arg_ordering_logits))
         return seq_loss + arg_order_loss,
 
 
@@ -328,12 +341,23 @@ class FixedPredicateGenerationModelModule(TFModelModule):
 
     @property
     def output_ports(self):
-        return [Ports.Prediction.logits, Ports.Prediction.candidate_index, FlatPorts.Prediction.symbols,
-                FlatPorts.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
+        return [Ports.Prediction.logits, Ports.Prediction.candidate_index, Ports.Prediction.symbols,
+                Ports.Prediction.seq_length, PredicateGenPorts.reversed_args_logits]
 
-    def create_output(self, shared_resources, predicate_idx,
-                      arg1, arg_len1, arg_chars1, arg_chars_len1,
-                      arg2, arg_len2, arg_chars2, arg_chars_len2, is_eval):
+    def create_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+
+        predicate_idx = tensors.predicate_idx
+        arg1 = tensors.arg1
+        arg_len1 = tensors.arg_len1
+        arg_chars1 = tensors.arg_chars1
+        arg_chars_len1 = tensors.arg_chars_len1
+        arg2 = tensors.arg2
+        arg_len2 = tensors.arg_len2
+        arg_chars2 = tensors.arg_chars2
+        arg_chars_len2 = tensors.arg_chars_len2
+        is_eval = tensors.is_eval
+
         size = shared_resources.config['repr_dim']
         with_char_embeddings = shared_resources.config.get('with_char_embeddings', False)
         max_conv_width = shared_resources.config.get('max_conv_width', 9)
@@ -355,13 +379,13 @@ class FixedPredicateGenerationModelModule(TFModelModule):
     def training_output_ports(self):
         return [Ports.loss]
 
-    def create_training_output(self, shared_resources, logits, predicate_idx,
-                               arg_ordering_logits, reversed_args):
+    def create_training_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
         num_neg = shared_resources.config.get('num_negatives', 1)
-        neg_labels = tf.zeros(tf.shape(predicate_idx) * num_neg, dtype=tf.int32)
-        predicate_idx = tf.concat([predicate_idx, neg_labels], axis=0)
-        loss = tf.losses.sparse_softmax_cross_entropy(labels=predicate_idx, logits=logits)
-        arg_order_loss = tf.losses.log_loss(reversed_args, tf.sigmoid(arg_ordering_logits))
+        neg_labels = tf.zeros(tf.shape(tensors.predicate_idx) * num_neg, dtype=tf.int32)
+        predicate_idx = tf.concat([tensors.predicate_idx, neg_labels], axis=0)
+        loss = tf.losses.sparse_softmax_cross_entropy(labels=predicate_idx, logits=tensors.logits)
+        arg_order_loss = tf.losses.log_loss(tensors.reversed_args, tf.sigmoid(tensors.arg_ordering_logits))
         return loss + arg_order_loss,
 
 

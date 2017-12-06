@@ -5,19 +5,19 @@ import numpy as np
 import tensorflow as tf
 from torch import nn
 
-from jack import tf_util
 from jack.core.data_structures import QASetting, Answer
 from jack.core.input_module import OnlineInputModule
 from jack.core.shared_resources import SharedResources
 from jack.core.tensorflow import TFModelModule
-from jack.core.tensorport import Ports, TensorPort
+from jack.core.tensorport import Ports, TensorPort, TensorPortTensors
 from jack.core.torch import PyTorchModelModule
 from jack.readers.multiple_choice import util
-from jack.tf_util.rnn import fused_birnn
+from jack.tfutil import misc
+from jack.tfutil.rnn import fused_birnn
 from jack.util import preprocessing
 from jack.util.map import numpify
 from projects.assertion_mr.shared import AssertionMRPorts, AssertionStore
-from projects.assertion_mr.tf_util import embedding_refinement, word_with_char_embed
+from projects.assertion_mr.tfutil import embedding_refinement, word_with_char_embed
 from projects.assertion_mr.torch_util import MyCrossEntropyLoss, SingleSupportAssertionClassificationModule
 
 
@@ -39,7 +39,7 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
                 AssertionMRPorts.question, AssertionMRPorts.support,
                 # optional, only during training
                 AssertionMRPorts.is_eval,
-                # for assertions
+                # for assertionss
                 AssertionMRPorts.word_embeddings,
                 AssertionMRPorts.assertion_lengths,
                 AssertionMRPorts.assertion2question,
@@ -84,15 +84,17 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
         answer_labels = []
         question_arg_span = []
         support_arg_span = []
-        assertion2question_arg_span = []
-        assertion2support_arg_span = []
+        assertions2question_arg_span = []
+        assertions2support_arg_span = []
 
         question_arg_span_idx = dict()
         support_arg_span_idx = dict()
 
-        word_chars, word_lengths, question2unique, support2unique, vocab, rev_vocab = \
-            preprocessing.unique_words_with_chars([a["question_tokens"] for a in annotations],
-                                                  [a["support_tokens"] for a in annotations], self.char_vocab)
+        word_chars, word_lengths, tokens, vocab, rev_vocab = \
+            preprocessing.unique_words_with_chars(
+                [a["question_tokens"] for a in annotations] + [a["support_tokens"] for a in annotations],
+                self.char_vocab)
+        question, support = tokens[:len(annotations)], tokens[len(annotations):]
 
         word2lemma = [None] * len(rev_vocab)
 
@@ -108,25 +110,25 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
             for k, l in enumerate(annot['question_lemmas']):
                 if l not in lemma2idx:
                     lemma2idx[l] = len(lemma2idx)
-                word2lemma[question2unique[i][k]] = lemma2idx[l]
+                word2lemma[question[i][k]] = lemma2idx[l]
             for k, l in enumerate(annot['support_lemmas']):
                 if l not in lemma2idx:
                     lemma2idx[l] = len(lemma2idx)
-                word2lemma[support2unique[i][k]] = lemma2idx[l]
+                word2lemma[support[i][k]] = lemma2idx[l]
 
             assertions, assertion_args = self._assertion_store.get_assertion_keys(
                 annot['question_lemmas'], annot['support_lemmas'])
-            sorted_assertions = sorted(assertions.items(), key=lambda x: -x[1])
-            added_assertions = set()
-            for key, _ in sorted_assertions:
-                if len(added_assertions) == self._limit:
+            sorted_assertionss = sorted(assertions.items(), key=lambda x: -x[1])
+            added_assertionss = set()
+            for key, _ in sorted_assertionss:
+                if len(added_assertionss) == self._limit:
                     break
                 a = self.__nlp(self._assertion_store.get_assertion(key))
                 a_lemma = " ".join(t.lemma_ for t in a)
-                if a_lemma in added_assertions:
+                if a_lemma in added_assertionss:
                     continue
                 else:
-                    added_assertions.add(a_lemma)
+                    added_assertionss.add(a_lemma)
                 ass2question.append(i)
                 ass_lengths.append(len(a))
                 q_arg_span = assertion_args[key][0]
@@ -139,8 +141,8 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
                 if s_arg_span not in support_arg_span_idx:
                     support_arg_span_idx[s_arg_span] = len(support_arg_span)
                     support_arg_span.append(assertion_args[key][1])
-                assertion2question_arg_span.append(question_arg_span_idx[q_arg_span])
-                assertion2support_arg_span.append(support_arg_span_idx[s_arg_span])
+                assertions2question_arg_span.append(question_arg_span_idx[q_arg_span])
+                assertions2support_arg_span.append(support_arg_span_idx[s_arg_span])
 
                 u_ass = []
                 for t in a:
@@ -174,8 +176,8 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
         output = {
             AssertionMRPorts.word_chars: word_chars,
             AssertionMRPorts.word_char_length: word_lengths,
-            AssertionMRPorts.question: question2unique,
-            AssertionMRPorts.support: support2unique,
+            AssertionMRPorts.question: question,
+            AssertionMRPorts.support: support,
             AssertionMRPorts.support_length: support_lengths,
             AssertionMRPorts.question_length: question_lengths,
             AssertionMRPorts.is_eval: is_eval,
@@ -186,8 +188,8 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
             AssertionMRPorts.word2lemma: word2lemma,
             AssertionMRPorts.question_arg_span: question_arg_span,
             AssertionMRPorts.support_arg_span: support_arg_span,
-            AssertionMRPorts.assertion2question_arg_span: assertion2question_arg_span,
-            AssertionMRPorts.assertion2support_arg_span: assertion2support_arg_span,
+            AssertionMRPorts.assertion2question_arg_span: assertions2question_arg_span,
+            AssertionMRPorts.assertion2support_arg_span: assertions2support_arg_span,
             '__vocab': vocab,
             '__rev_vocab': rev_vocab,
             '__lemma_vocab': lemma2idx,
@@ -238,7 +240,7 @@ class SingleSupportFixedClassAssertionMixin:
                 AssertionMRPorts.question, AssertionMRPorts.support,
                 # optional input, provided only during training
                 AssertionMRPorts.is_eval,
-                # assertion related ports
+                # assertions related ports
                 AssertionMRPorts.word_embeddings, AssertionMRPorts.assertion_lengths,
                 AssertionMRPorts.assertion2question, AssertionMRPorts.assertions,
                 AssertionMRPorts.word2lemma]
@@ -273,107 +275,120 @@ class NLIAssertionModelTorch(SingleSupportFixedClassAssertionMixin, PyTorchModel
 
 
 class SimpleNLIModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
-    def create_output(self, shared_resources, question_length, support_length,
-                      word_chars, word_char_length,
-                      question_words, support_words, is_eval,
-                      word_embeddings, assertion_length, assertion2question, assertion_words,
-                      word2lemma):
+    def create_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+
         # Some helpers
         input_size = shared_resources.config["repr_dim_input"]
         size = shared_resources.config["repr_dim"]
         num_classes = shared_resources.config["answer_size"]
         with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
 
+        word_embeddings = tensors.word_embeddings
         word_embeddings.set_shape([None, input_size])
 
         if with_char_embeddings:
             word_embeddings = word_with_char_embed(
-                size, word_embeddings, word_chars, word_char_length,
-                len(shared_resources.char_vocab), is_eval,
+                size, word_embeddings, tensors.word_chars, tensors.word_char_length,
+                len(shared_resources.char_vocab), tensors.is_eval,
                 keep_prob=1.0 - shared_resources.config.get('dropout', 0.0))
 
-        emb_question = tf.nn.embedding_lookup(word_embeddings, question_words, name='embedded_question')
-        emb_support = tf.nn.embedding_lookup(word_embeddings, support_words, name='embedded_support')
+        emb_question = tf.nn.embedding_lookup(word_embeddings, tensors.question, name='embedded_question')
+        emb_support = tf.nn.embedding_lookup(word_embeddings, tensors.support, name='embedded_support')
 
-        logits = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
+        logits = nli_model(size, num_classes, emb_question, tensors.question_length, emb_support,
+                           tensors.support_length)
 
         return logits, tf.argmax(logits, 1)
 
-    def create_training_output(self, shared_resources: SharedResources, logits: tf.Tensor, labels: tf.Tensor):
-        return tf.losses.sparse_softmax_cross_entropy(logits=logits, labels=labels),
+    def create_training_output(self, shared_resources: SharedResources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+        return tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.labels),
 
 
 class NLIAssertionModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
-    def create_output(self, shared_resources, question_length, support_length,
-                      word_chars, word_char_length,
-                      question_words, support_words2uniq, is_eval,
-                      word_embeddings, assertion_length, assertion2question, assertion_words,
-                      word2lemma):
-        with tf.variable_scope("mc_assertion", initializer=tf.contrib.layers.xavier_initializer()):
-            # Some helpers
-            input_size = shared_resources.config["repr_dim_input"]
-            size = shared_resources.config["repr_dim"]
-            num_classes = shared_resources.config["answer_size"]
-            with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
+    def create_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
 
-            word_embeddings.set_shape([None, input_size])
+        question_length = tensors.question_length
+        support_length = tensors.support_length
+        word_chars = tensors.word_chars
+        word_char_length = tensors.word_char_length
+        question = tensors.question
+        support = tensors.support
+        is_eval = tensors.is_eval
+        word_embeddings = tensors.word_embeddings
+        assertion_length = tensors.assertion_length
+        assertion2question = tensors.assertion2question
+        assertions = tensors.assertions
+        word2lemma = tensors.word2lemma
 
-            reading_sequence = [support_words2uniq, question_words, assertion_words]
-            reading_sequence_lengths = [support_length, question_length, assertion_length]
-            reading_sequence_2_batch = [None, None, assertion2question]
+        # Some helpers
+        input_size = shared_resources.config["repr_dim_input"]
+        size = shared_resources.config["repr_dim"]
+        num_classes = shared_resources.config["answer_size"]
+        with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
+        reading_encoder_config = shared_resources.config['reading_module']
 
-            if shared_resources.config.get("train_residual", False):
-                new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
-                    size, word_embeddings,
-                    reading_sequence[:2], reading_sequence_2_batch[:2], reading_sequence_lengths[:2],
-                    word2lemma, word_chars, word_char_length, is_eval,
-                    keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
-                    with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab)
-                )
-                emb_question = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[1],
-                                                      name='embedded_question')
-                emb_support = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[0],
-                                                     name='embedded_support')
-                logits_1 = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
+        word_embeddings.set_shape([None, input_size])
 
-                tf.get_variable_scope().reuse_variables()
+        reading_sequence = [support, question, assertions]
+        reading_sequence_lengths = [support_length, question_length, assertion_length]
+        reading_sequence_2_batch = [None, None, assertion2question]
 
-                new_word_embeddings, _, _ = embedding_refinement(
-                    size, new_word_embeddings,
-                    [assertion_words], [assertion2question], [assertion_length],
-                    word2lemma, word_chars, word_char_length, is_eval, only_refine=True,
-                    batch_size=tf.shape(question_length)[0], sequence_indices=[2])
-            else:
-                new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
-                    size, word_embeddings,
-                    reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
-                    word2lemma, word_chars, word_char_length, is_eval,
-                    keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
-                    with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))
-
+        if shared_resources.config.get("train_residual", False):
+            new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
+                size, word_embeddings, reading_encoder_config,
+                reading_sequence[:2], reading_sequence_2_batch[:2], reading_sequence_lengths[:2],
+                word2lemma, word_chars, word_char_length, is_eval,
+                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
+                with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab)
+            )
             emb_question = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[1],
                                                   name='embedded_question')
             emb_support = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[0],
                                                  name='embedded_support')
+            logits_1 = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
 
-            logits = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
+            tf.get_variable_scope().reuse_variables()
+
+            new_word_embeddings, _, _ = embedding_refinement(
+                size, new_word_embeddings,
+                [assertions], [assertion2question], [assertion_length],
+                word2lemma, word_chars, word_char_length, is_eval, only_refine=True,
+                batch_size=tf.shape(question_length)[0], sequence_indices=[2])
+        else:
+            new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
+                size, word_embeddings,
+                reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
+                word2lemma, word_chars, word_char_length, is_eval,
+                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
+                with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))
+
+        emb_question = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[1],
+                                              name='embedded_question')
+        emb_support = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[0],
+                                             name='embedded_support')
+
+        logits = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
 
         if shared_resources.config.get("train_residual", False):
             return tf.concat([logits, logits_1], 0), tf.argmax(logits, 1)
         else:
             return logits, tf.argmax(logits, 1)
 
-    def create_training_output(self, shared_resources: SharedResources, logits: tf.Tensor, labels: tf.Tensor):
+    def create_training_output(self, shared_resources: SharedResources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
         if shared_resources.config.get("train_residual", False):
-            losses = tf.losses.sparse_softmax_cross_entropy(logits=logits, labels=tf.tile(labels, [2]),
+            losses = tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tf.tile(tensors.labels, [2]),
                                                             reduction=tf.losses.Reduction.NONE)
-            losses_with_assertion, losses = tf.split(losses, 2)
-            loss_diff = tf.maximum(losses_with_assertion - losses + 0.1, 0.0)
-            tf.summary.scalar('gain', tf.reduce_mean(losses - losses_with_assertion))
-            tf.summary.scalar('loss', tf.reduce_mean(losses_with_assertion))
-            return tf.reduce_mean(losses_with_assertion + loss_diff),
+            losses_with_assertions, losses = tf.split(losses, 2)
+            loss_diff = tf.maximum(losses_with_assertions - losses + 0.1, 0.0)
+            tf.summary.scalar('gain', tf.reduce_mean(losses - losses_with_assertions))
+            tf.summary.scalar('loss', tf.reduce_mean(losses_with_assertions))
+            return tf.reduce_mean(losses_with_assertions + loss_diff),
         else:
-            return tf.losses.sparse_softmax_cross_entropy(logits=logits, labels=labels),
+            return tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.labels),
 
 
 def nli_model(size, num_classes, emb_question, question_length, emb_support, support_length):
@@ -388,7 +403,7 @@ def nli_model(size, num_classes, emb_question, question_length, emb_support, sup
     # [batch, T, 2 * dim] -> [batch, dim]
     outputs = tf.concat([outputs[0], outputs[1]], axis=2)
     hidden = tf.layers.dense(outputs, size, tf.nn.relu, name="hidden") * tf.expand_dims(
-        tf_util.misc.mask_for_lengths(support_length, max_length=tf.shape(outputs)[1], mask_right=False, value=1.0), 2)
+        misc.mask_for_lengths(support_length, max_length=tf.shape(outputs)[1], mask_right=False, value=1.0), 2)
     hidden = tf.reduce_max(hidden, axis=1)
     # [batch, dim] -> [batch, num_classes]
     outputs = tf.layers.dense(hidden, num_classes, name="classification")
