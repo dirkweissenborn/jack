@@ -1,0 +1,40 @@
+description: >
+  BiLSTM with assertions.
+
+parent_config: './conf/qa/jack_qa_light.yaml'
+
+name: 'bilstm_assertion_reader'
+reader: 'modular_assertion_qa_reader'
+
+assertion_dir: '/data/assertion_shelve'
+assertion_limit: 50
+assertion_sources: ['conceptnet']
+
+reading_module:
+  - input: 'text'
+    module: 'lstm'
+    with_projection: True
+    activation: 'relu'
+
+dropout: &dropout 0.2
+repr_dim: 150
+
+# To be fast we have to restrict the use of RNNs as much as possible and use convolutions instead
+model:
+  encoder_layer:
+
+  - input: 'support'
+    module: 'lstm'
+    with_projection: True
+    activation: 'tanh'
+    dropout: *dropout
+
+  - input: 'question'
+    module: 'lstm'
+    with_projection: True
+    activation: 'tanh'
+    dropout: *dropout
+
+  answer_layer:
+    module: 'bilinear'
+    max_span_size: 16

@@ -45,17 +45,10 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
             if i > 0:
                 vs.reuse_variables()
             num_seq = tf.shape(length)[0]
-            with tf.device('/cpu:0'):
-                affected_words, new_seq = tf.unique(tf.reshape(seq, [-1]))
-                new_seq = tf.reshape(new_seq, tf.shape(seq))
-                affected_word2lemma = tf.gather(word2lemma_off, affected_words)
-                unique_affected_lemmas, new_word2lemmas = tf.unique(affected_word2lemma)
-
-            affected_embeddings = tf.gather(ctxt_word_embeddings, affected_words)
 
             def non_zero_batchsize_op():
                 max_length = tf.shape(seq)[1]
-                encoded = tf.nn.embedding_lookup(affected_embeddings, new_seq)
+                encoded = tf.nn.embedding_lookup(ctxt_word_embeddings, seq)
                 one_hot = [0.0] * num_sequences
                 one_hot[i] = 1.0
                 mode_feature = tf.constant([[one_hot]], tf.float32)
@@ -64,27 +57,19 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
                 encoded = modular_encoder.modular_encoder(
                     sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size, is_eval)[0]['text']
 
-                mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
-                encoded = encoded * tf.expand_dims(mask, 2)
-
-                seq_lemmas = tf.gather(new_word2lemmas, tf.reshape(new_seq, [-1]))
+                seq_lemmas = tf.gather(word2lemma_off, tf.reshape(seq, [-1]))
                 new_lemma_embeddings = tf.unsorted_segment_max(
-                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.shape(unique_affected_lemmas)[0])
+                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.reduce_max(seq_lemmas) + 1)
                 new_lemma_embeddings = tf.nn.relu(new_lemma_embeddings)
 
-                return tf.gather(new_lemma_embeddings, new_word2lemmas)
+                return tf.gather(new_lemma_embeddings, word2lemma_off)
 
-            new_word_embeddings = tf.cond(num_seq > 0, non_zero_batchsize_op,
-                                          lambda: tf.zeros_like(affected_embeddings))
+            new_word_embeddings = tf.cond(batch_size > 0, non_zero_batchsize_op,
+                                          lambda: tf.zeros_like(ctxt_word_embeddings))
             # update old word embeddings with new ones via gated addition
-            gate = tf.layers.dense(tf.concat([affected_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
+            gate = tf.layers.dense(tf.concat([ctxt_word_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
                                    bias_initializer=tf.constant_initializer(1.0), name="embeddings_gating")
-            affected_embeddings = affected_embeddings * gate + (1.0 - gate) * new_word_embeddings
-            new_ctxt_word_embeddings = tf.unsorted_segment_max(affected_embeddings, affected_words,
-                                                               num_words * batch_size)
-
-            u_gate = tf.to_float(new_ctxt_word_embeddings[:, :1] < 0.0)
-            ctxt_word_embeddings = u_gate * ctxt_word_embeddings + (1.0 - u_gate) * new_ctxt_word_embeddings
+            ctxt_word_embeddings = ctxt_word_embeddings * gate + (1.0 - gate) * new_word_embeddings
 
     return ctxt_word_embeddings, reading_sequence_offset, offsets
 
@@ -169,6 +154,7 @@ def span_pairs_uniq(batch_id, spans1, spans2, scope="span_embedding"):
 
     return span_pair_idx, uniq_batch_ids
 
+
 def embed_span_pairs_uniq(batch_id, spans1, spans2, sequence1, sequence2, size, scope="span_embedding"):
     """Spans have 3 entries [batch_id, start, end].
 
@@ -211,3 +197,90 @@ def embed_span_pairs_uniq(batch_id, spans1, spans2, sequence1, sequence2, size, 
             tf.concat([embedded_starts2, embedded_ends2], 1), size, activation=tf.nn.relu, name="span_projection2")
 
         return embedded_span_pairs1, embedded_span_pairs2, span_pair_idx, uniq_batch_ids
+
+
+#################################### Doesn't work as well as the normal version ###############################
+
+def embedding_refinement_alt(size, word_embeddings, sequence_module, reading_sequence, reading_sequence_2_batch,
+                             reading_sequence_lengths, word2lemma, unique_word_chars=None,
+                             unique_word_char_length=None, is_eval=False, sequence_indices=None, num_sequences=4,
+                             only_refine=False, keep_prob=1.0, batch_size=None, with_char_embeddings=False,
+                             num_chars=0):
+    if batch_size is None:
+        batch_size = tf.reduce_max(tf.stack([tf.shape(s)[0] if s2b is None else tf.reduce_max(s2b) + 1
+                                             for s, s2b in zip(reading_sequence, reading_sequence_2_batch)]))
+
+    sequence_indices = sequence_indices if sequence_indices is not None else list(range(len(reading_sequence)))
+
+    if not only_refine:
+        word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu, name="embeddings_projection")
+        if with_char_embeddings:
+            word_embeddings = word_with_char_embed(
+                size, word_embeddings, unique_word_chars, unique_word_char_length, num_chars, is_eval, keep_prob)
+        # tile word_embeddings by batch size (individual batches update embeddings individually)
+        ctxt_word_embeddings = tf.tile(word_embeddings, tf.stack([batch_size, 1]))
+        # HACK so that backprop works with indexed slices that come through here which are not handled by tile
+        ctxt_word_embeddings *= 1.0
+    else:
+        ctxt_word_embeddings = word_embeddings
+
+    num_words = tf.shape(word2lemma)[0]
+
+    # divide uniq words for each question by offsets
+    offsets = tf.expand_dims(tf.range(0, num_words * batch_size, num_words), 1)
+
+    # each token is assigned a word idx + offset for distinguishing words between batch instances
+    reading_sequence_offset = [
+        s + offsets if s2b is None else s + tf.gather(offsets, s2b)
+        for s, s2b in zip(reading_sequence, reading_sequence_2_batch)]
+
+    word2lemma_off = tf.tile(tf.reshape(word2lemma, [1, -1]), [batch_size, 1]) + offsets
+    word2lemma_off = tf.reshape(word2lemma_off, [-1])
+
+    with tf.variable_scope("refinement") as vs:
+        for i, seq, length in zip(sequence_indices, reading_sequence_offset, reading_sequence_lengths):
+            if i > 0:
+                vs.reuse_variables()
+            num_seq = tf.shape(length)[0]
+
+            def non_zero_batchsize_op():
+                with tf.device('/cpu:0'):
+                    affected_words, new_seq = tf.unique(tf.reshape(seq, [-1]))
+                    new_seq = tf.reshape(new_seq, tf.shape(seq))
+                    affected_word2lemma = tf.gather(word2lemma_off, affected_words)
+                    unique_affected_lemmas, affected_word2lemmas = tf.unique(affected_word2lemma)
+                    seq_lemmas = tf.gather(affected_word2lemmas, tf.reshape(new_seq, [-1]))
+
+                affected_embeddings = tf.gather(ctxt_word_embeddings, affected_words)
+                max_length = tf.shape(seq)[1]
+                encoded = tf.nn.embedding_lookup(affected_embeddings, new_seq)
+                one_hot = [0.0] * num_sequences
+                one_hot[i] = 1.0
+                mode_feature = tf.constant([[one_hot]], tf.float32)
+                mode_feature = tf.tile(mode_feature, tf.stack([num_seq, max_length, 1]))
+                encoded = tf.concat([encoded, mode_feature], 2)
+                encoded = modular_encoder.modular_encoder(
+                    sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size, is_eval)[0]['text']
+
+                mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
+                encoded = encoded * tf.expand_dims(mask, 2)
+
+                new_lemma_embeddings = tf.unsorted_segment_max(
+                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.shape(unique_affected_lemmas)[0])
+                new_lemma_embeddings = tf.nn.relu(new_lemma_embeddings)
+
+                new_word_embeddings = tf.gather(new_lemma_embeddings, affected_word2lemmas)
+                # update old word embeddings with new ones via gated addition
+                gate = tf.layers.dense(tf.concat([affected_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
+                                       bias_initializer=tf.constant_initializer(1.0), name="embeddings_gating")
+                affected_embeddings = affected_embeddings * gate + (1.0 - gate) * new_word_embeddings
+                new_ctxt_word_embeddings = tf.unsorted_segment_max(affected_embeddings, affected_words,
+                                                                   num_words * batch_size)
+
+                u_gate = tf.to_float(new_ctxt_word_embeddings[:, :1] < 0.0)
+                new_ctxt_word_embeddings = u_gate * ctxt_word_embeddings + (1.0 - u_gate) * new_ctxt_word_embeddings
+                return new_ctxt_word_embeddings
+
+            ctxt_word_embeddings = tf.cond(num_seq > 0, non_zero_batchsize_op, lambda: ctxt_word_embeddings)
+
+    return ctxt_word_embeddings, reading_sequence_offset, offsets
