@@ -40,22 +40,26 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
     word2lemma_off = tf.tile(tf.reshape(word2lemma, [1, -1]), [batch_size, 1]) + offsets
     word2lemma_off = tf.reshape(word2lemma_off, [-1])
 
-    num_lemmas = tf.reduce_max(word2lemma_off) + 1
-
-    fused_rnn = tf.contrib.rnn.LSTMBlockFusedCell(size)
     with tf.variable_scope("refinement") as vs:
         for i, seq, length in zip(sequence_indices, reading_sequence_offset, reading_sequence_lengths):
             if i > 0:
                 vs.reuse_variables()
-            batch_size = tf.shape(length)[0]
+            num_seq = tf.shape(length)[0]
+            with tf.device('/cpu:0'):
+                affected_words, new_seq = tf.unique(tf.reshape(seq, [-1]))
+                new_seq = tf.reshape(new_seq, tf.shape(seq))
+                affected_word2lemma = tf.gather(word2lemma_off, affected_words)
+                unique_affected_lemmas, new_word2lemmas = tf.unique(affected_word2lemma)
+
+            affected_embeddings = tf.gather(ctxt_word_embeddings, affected_words)
 
             def non_zero_batchsize_op():
                 max_length = tf.shape(seq)[1]
-                encoded = tf.nn.embedding_lookup(ctxt_word_embeddings, seq)
+                encoded = tf.nn.embedding_lookup(affected_embeddings, new_seq)
                 one_hot = [0.0] * num_sequences
                 one_hot[i] = 1.0
                 mode_feature = tf.constant([[one_hot]], tf.float32)
-                mode_feature = tf.tile(mode_feature, tf.stack([batch_size, max_length, 1]))
+                mode_feature = tf.tile(mode_feature, tf.stack([num_seq, max_length, 1]))
                 encoded = tf.concat([encoded, mode_feature], 2)
                 encoded = modular_encoder.modular_encoder(
                     sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size, is_eval)[0]['text']
@@ -63,19 +67,24 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
                 mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
                 encoded = encoded * tf.expand_dims(mask, 2)
 
-                seq_lemmas = tf.gather(word2lemma_off, tf.reshape(seq, [-1]))
+                seq_lemmas = tf.gather(new_word2lemmas, tf.reshape(new_seq, [-1]))
                 new_lemma_embeddings = tf.unsorted_segment_max(
-                    tf.reshape(encoded, [-1, size]), seq_lemmas, num_lemmas)
+                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.shape(unique_affected_lemmas)[0])
                 new_lemma_embeddings = tf.nn.relu(new_lemma_embeddings)
 
-                return tf.gather(new_lemma_embeddings, word2lemma_off)
+                return tf.gather(new_lemma_embeddings, new_word2lemmas)
 
-            new_word_embeddings = tf.cond(batch_size > 0, non_zero_batchsize_op,
-                                          lambda: tf.zeros_like(ctxt_word_embeddings))
+            new_word_embeddings = tf.cond(num_seq > 0, non_zero_batchsize_op,
+                                          lambda: tf.zeros_like(affected_embeddings))
             # update old word embeddings with new ones via gated addition
-            gate = tf.layers.dense(tf.concat([ctxt_word_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
+            gate = tf.layers.dense(tf.concat([affected_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
                                    bias_initializer=tf.constant_initializer(1.0), name="embeddings_gating")
-            ctxt_word_embeddings = ctxt_word_embeddings * gate + (1.0 - gate) * new_word_embeddings
+            affected_embeddings = affected_embeddings * gate + (1.0 - gate) * new_word_embeddings
+            new_ctxt_word_embeddings = tf.unsorted_segment_max(affected_embeddings, affected_words,
+                                                               num_words * batch_size)
+
+            u_gate = tf.to_float(new_ctxt_word_embeddings[:, :1] < 0.0)
+            ctxt_word_embeddings = u_gate * ctxt_word_embeddings + (1.0 - u_gate) * new_ctxt_word_embeddings
 
     return ctxt_word_embeddings, reading_sequence_offset, offsets
 

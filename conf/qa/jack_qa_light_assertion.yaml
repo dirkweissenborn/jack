@@ -75,15 +75,6 @@ model:
     num_layers: 1
     residual: True
 
-  - input: ['support', 'support_self']
-    output: 'support'
-    module: 'add'
-  - input: 'support'
-    module: 'conv_glu'
-    conv_width: 5
-    num_layers: 1
-    residual: True
-
   answer_layer:
     module: 'bilinear'
     max_span_size: 16
