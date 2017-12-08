@@ -3,19 +3,13 @@ description: >
 
 parent_config: './conf/qa/jack_qa_light.yaml'
 
-name: 'bilstm_assertion_reader'
+name: 'bilstm_liq_reader'
 reader: 'modular_assertion_qa_reader'
 
 assertion_dir: '/data/assertion_shelve'
-assertion_limit: 50
-assertion_sources: ['conceptnet']
-no_reading: False
-
-reading_module:
-  - input: 'text'
-    module: 'lstm'
-    with_projection: True
-    activation: 'relu'
+assertion_limit: 0
+assertion_sources: []
+no_reading: True
 
 dropout: &dropout 0.2
 repr_dim: 150
@@ -23,13 +17,11 @@ repr_dim: 150
 # To be fast we have to restrict the use of RNNs as much as possible and use convolutions instead
 model:
   encoder_layer:
-
-  - input: 'support'
-    dependent: 'question'
-    module: 'attention_matching'
-    attn_type: 'diagonal_bilinear'
-    with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
-    scaled: True
+  - input: ['support', 'word_in_question', 'word_in_question']
+    module: 'lstm'
+    with_projection: True
+    activation: 'relu'
+    dropout: *dropout
 
   - input: 'support'
     module: 'lstm'
@@ -40,7 +32,7 @@ model:
   - input: 'question'
     module: 'lstm'
     with_projection: True
-    activation: 'relu'
+    activation: 'tanh'
     dropout: *dropout
 
   answer_layer:

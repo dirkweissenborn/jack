@@ -9,6 +9,7 @@ reader: 'modular_assertion_qa_reader'
 assertion_dir: '/data/assertion_shelve'
 assertion_limit: 50
 assertion_sources: ['conceptnet']
+no_reading: False
 
 reading_module:
   - input: 'text'
@@ -26,13 +27,13 @@ model:
   - input: 'support'
     module: 'lstm'
     with_projection: True
-    activation: 'tanh'
+    activation: 'relu'
     dropout: *dropout
 
   - input: 'question'
     module: 'lstm'
     with_projection: True
-    activation: 'tanh'
+    activation: 'relu'
     dropout: *dropout
 
   answer_layer:

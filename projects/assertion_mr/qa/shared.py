@@ -14,7 +14,7 @@ from jack.tfutil.modular_encoder import modular_encoder
 from jack.util import preprocessing
 from jack.util.map import numpify
 from projects.assertion_mr.shared import AssertionMRPorts, AssertionStore
-from projects.assertion_mr.tfutil import embedding_refinement
+from projects.assertion_mr.tfutil import embedding_refinement, word_with_char_embed
 
 XQAAssertionAnnotation = NamedTuple('XQAAssertionAnnotation', [
     ('question_tokens', List[str]),
@@ -335,7 +335,6 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
         word2lemma = tensors.word2lemma
 
         model = shared_resources.config['model']
-        reading_encoder_config = shared_resources.config['reading_module']
         repr_dim = shared_resources.config['repr_dim']
         input_size = shared_resources.config["repr_dim_input"]
         size = shared_resources.config["repr_dim"]
@@ -343,16 +342,24 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
 
         word_embeddings.set_shape([None, input_size])
 
-        reading_sequence = [support, question, assertions]
-        reading_sequence_lengths = [support_length, question_length, assertion_lengths]
-        reading_sequence_2_batch = [support2question, None, assertion2question]
+        if shared_resources.config.get('no_reading', False):
+            new_word_embeddings = word_with_char_embed(
+                size, word_embeddings, tensors.word_chars, tensors.word_char_length,
+                len(shared_resources.char_vocab), tensors.is_eval,
+                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0))
+            reading_sequence_offset = [support, question, assertions]
+        else:
+            reading_sequence = [support, question, assertions]
+            reading_sequence_lengths = [support_length, question_length, assertion_lengths]
+            reading_sequence_2_batch = [support2question, None, assertion2question]
 
-        new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
-            size, word_embeddings, reading_encoder_config,
-            reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
-            word2lemma, word_chars, word_char_length, is_eval,
-            keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
-            with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))
+            reading_encoder_config = shared_resources.config['reading_module']
+            new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
+                size, word_embeddings, reading_encoder_config,
+                reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
+                word2lemma, word_chars, word_char_length, is_eval,
+                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
+                with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))
 
         emb_question = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[1],
                                               name='embedded_question')
