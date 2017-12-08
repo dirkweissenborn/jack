@@ -18,6 +18,7 @@ repr_dim: 150
 model:
   encoder_layer:
   - input: ['support', 'word_in_question', 'word_in_question']
+    output: 'support'
     module: 'lstm'
     with_projection: True
     activation: 'relu'
