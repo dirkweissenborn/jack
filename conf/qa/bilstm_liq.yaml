@@ -19,10 +19,7 @@ model:
   encoder_layer:
   - input: ['support', 'word_in_question', 'word_in_question']
     output: 'support'
-    module: 'lstm'
-    with_projection: True
-    activation: 'relu'
-    dropout: *dropout
+    module: 'concat'
 
   - input: 'support'
     module: 'lstm'
@@ -33,9 +30,9 @@ model:
   - input: 'question'
     module: 'lstm'
     with_projection: True
-    activation: 'tanh'
+    activation: 'relu'
     dropout: *dropout
 
   answer_layer:
-    module: 'bilinear'
+    module: 'mlp'
     max_span_size: 16

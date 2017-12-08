@@ -37,5 +37,5 @@ model:
     dropout: *dropout
 
   answer_layer:
-    module: 'bilinear'
+    module: 'mlp'
     max_span_size: 16

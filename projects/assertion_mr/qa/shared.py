@@ -343,6 +343,8 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
         word_embeddings.set_shape([None, input_size])
 
         if shared_resources.config.get('no_reading', False):
+            word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu,
+                                              name="embeddings_projection")
             new_word_embeddings = word_with_char_embed(
                 size, word_embeddings, tensors.word_chars, tensors.word_char_length,
                 len(shared_resources.char_vocab), tensors.is_eval,
