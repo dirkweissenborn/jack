@@ -327,6 +327,9 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
     def input_ports(self) -> Sequence[TensorPort]:
         return self._input_ports
 
+    def set_beam_size(self, k):
+        self._beam_size_assign(k)
+
     def create_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
 
@@ -400,6 +403,14 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
 
             if 'repr_dim' not in answer_layer_config:
                 answer_layer_config['repr_dim'] = repr_dim
+
+            beam_size = tf.get_variable(
+                'beam_size', initializer=answer_layer_config.get('beam_size', 1.0), dtype=tf.float32)
+            beam_size_p = tf.placeholder(tf.float32, [], 'beam_size_setter')
+            beam_size_assign = beam_size.assign(beam_size_p)
+            self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
+            answer_layer_config['beam_size'] = beam_size
+
             start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
                 answer_layer(encoded_question, tensors.question_length, encoded_support,
                              tensors.support_length,
