@@ -49,6 +49,7 @@ class XQAAssertionInputModule(XQAInputModule):
                      AssertionMRPorts.support_arg_span,
                      AssertionMRPorts.assertion2support_arg_span,
                      AssertionMRPorts.word2lemma,
+                     XQAPorts.word_in_question,
                      XQAPorts.support2question,
                      # optional, only during training
                      XQAPorts.answer2support_training, XQAPorts.correct_start,
@@ -137,13 +138,17 @@ class XQAAssertionInputModule(XQAInputModule):
 
         max_num_support = self.config.get("max_num_support")  # take all per default
         s_tokenized = []
+        s_lemmas = []
         support_lengths = []
         wiq = []
         offsets = []
         support2question = []
         # aligns with support2question, used in output module to get correct index to original set of supports
         selected_support = []
-        for j, a in enumerate(annotations):
+        all_spans = []
+        for i, a in enumerate(annotations):
+            s_lemmas.append([])
+            all_spans.append([])
             if max_num_support is not None and len(a.support_tokens) > max(1, max_num_support // 2) and not is_eval:
                 # always take first (the best) and sample from rest during training, only consider half to speed
                 # things up. Following https://arxiv.org/pdf/1710.10723.pdf we sample half during training
@@ -153,11 +158,14 @@ class XQAAssertionInputModule(XQAInputModule):
                 selected = set(range(len(a.support_tokens)))
             for s in selected:
                 s_tokenized.append(a.support_tokens[s])
+                s_lemmas[-1].append(a.support_lemmas[s])
                 support_lengths.append(a.support_length[s])
                 wiq.append(a.word_in_question[s])
                 offsets.append(a.token_offsets[s])
                 selected_support.append(a.selected_supports[s])
-                support2question.append(j)
+                support2question.append(i)
+                if with_answers:
+                    all_spans[-1].append(a.answer_spans[s])
 
         word_chars, word_lengths, word_ids, vocab, rev_vocab = \
             preprocessing.unique_words_with_chars(q_tokenized + s_tokenized, self.char_vocab)
@@ -186,14 +194,14 @@ class XQAAssertionInputModule(XQAInputModule):
                 if l not in lemma2idx:
                     lemma2idx[l] = len(lemma2idx)
                 word2lemma[question[i][k]] = lemma2idx[l]
-            for k, ls in enumerate(annot.support_lemmas):
+            for k, ls in enumerate(s_lemmas[i]):
                 for k2, l in enumerate(ls):
                     if l not in lemma2idx:
                         lemma2idx[l] = len(lemma2idx)
                     word2lemma[support[s_offset + k][k2]] = lemma2idx[l]
 
             assertions, assertion_args = self._assertion_store.get_assertion_keys(
-                annot.question_lemmas, [l for ls in annot.support_lemmas for l in ls])
+                annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls])
             sorted_assertions = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertions = set()
             for key, _ in sorted_assertions:
@@ -211,7 +219,7 @@ class XQAAssertionInputModule(XQAInputModule):
                 q_arg_span = (i, q_arg_span[0], q_arg_span[1])
                 s_arg_start, s_arg_end = assertion_args[key][1]
                 doc_idx = 0
-                for ls in annot.support_lemmas:
+                for ls in s_lemmas[i]:
                     if s_arg_start < len(ls):
                         break
                     else:
@@ -242,7 +250,7 @@ class XQAAssertionInputModule(XQAInputModule):
                     u_ass.append(vocab[w])
                 ass2unique.append(u_ass)
 
-            s_offset += len(annot.support_lemmas)
+            s_offset += len(s_lemmas[i])
 
         word_embeddings = np.zeros([len(rev_vocab), self.emb_matrix.shape[1]])
         for i, w in enumerate(rev_vocab):
@@ -269,6 +277,7 @@ class XQAAssertionInputModule(XQAInputModule):
             AssertionMRPorts.support_arg_span: support_arg_span,
             AssertionMRPorts.assertion2question_arg_span: assertion2question_arg_span,
             AssertionMRPorts.assertion2support_arg_span: assertion2support_arg_span,
+            XQAPorts.word_in_question: wiq,
             XQAPorts.support2question: support2question,
             XQAPorts.token_offsets: offsets,
             XQAPorts.selected_support: selected_support,
@@ -278,11 +287,11 @@ class XQAAssertionInputModule(XQAInputModule):
         }
 
         if with_answers:
-            spans = [s for a in annotations for spans_per_support in a.answer_spans for s in spans_per_support]
+            spans = [s for a in all_spans for spans_per_support in a for s in spans_per_support]
             span2support = []
             support_idx = 0
-            for a in annotations:
-                for spans_per_support in a.answer_spans:
+            for a in all_spans:
+                for spans_per_support in a:
                     span2support.extend([support_idx] * len(spans_per_support))
                     support_idx += 1
             output.update({
@@ -309,6 +318,7 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                     AssertionMRPorts.assertion2question,
                     AssertionMRPorts.assertions,
                     AssertionMRPorts.word2lemma,
+                    XQAPorts.word_in_question,
                     XQAPorts.support2question,
                     XQAPorts.correct_start,
                     XQAPorts.answer2support_training]
@@ -351,9 +361,14 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                 keep_prob=1.0 - shared_resources.config.get('dropout', 0.0))
             reading_sequence_offset = [support, question, assertions]
         else:
-            reading_sequence = [support, question, assertions]
-            reading_sequence_lengths = [support_length, question_length, assertion_lengths]
-            reading_sequence_2_batch = [support2question, None, assertion2question]
+            if shared_resources.config.get("assertion_limit", 0) > 0:
+                reading_sequence = [support, question, assertions]
+                reading_sequence_lengths = [support_length, question_length, assertion_lengths]
+                reading_sequence_2_batch = [support2question, None, assertion2question]
+            else:
+                reading_sequence = [support, question]
+                reading_sequence_lengths = [support_length, question_length]
+                reading_sequence_2_batch = [support2question, None]
 
             reading_encoder_config = shared_resources.config['reading_module']
             new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
@@ -368,8 +383,10 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
         emb_support = tf.nn.embedding_lookup(new_word_embeddings, reading_sequence_offset[0],
                                              name='embedded_support')
 
-        inputs = {'question': emb_question, 'support': emb_support}
-        inputs_length = {'question': question_length, 'support': support_length}
+        inputs = {'question': emb_question, 'support': emb_support,
+                  'word_in_question': tf.expand_dims(tensors.word_in_question, 2)}
+        inputs_length = {'question': question_length, 'support': support_length,
+                         'word_in_question': support_length}
         inputs_mapping = {'question': None, 'support': support2question}
 
         encoder_config = model['encoder_layer']

@@ -78,7 +78,7 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
 
                 return new_ctxt_word_embeddings
 
-            new_word_embeddings = tf.cond(batch_size > 0, non_zero_batchsize_op,
+            new_word_embeddings = tf.cond(num_seq > 0, non_zero_batchsize_op,
                                           lambda: tf.zeros_like(ctxt_word_embeddings))
             # update old word embeddings with new ones via gated addition
             gate = tf.layers.dense(tf.concat([ctxt_word_embeddings, new_word_embeddings], 1), size, tf.nn.sigmoid,
