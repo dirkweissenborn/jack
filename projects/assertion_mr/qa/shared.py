@@ -135,16 +135,32 @@ class XQAAssertionInputModule(XQAInputModule):
         q_tokenized = [a.question_tokens for a in annotations]
         question_lengths = [a.question_length for a in annotations]
 
-        s_tokenized = [ts for a in annotations for ts in a.support_tokens]
-        support_lengths = [l for a in annotations for l in a.support_length]
-        offsets = [offsets for a in annotations for offsets in a.token_offsets]
-        support2question = [i for i, a in enumerate(annotations) for _ in a.support_tokens]
+        max_num_support = self.config.get("max_num_support")  # take all per default
+        s_tokenized = []
+        support_lengths = []
+        wiq = []
+        offsets = []
+        support2question = []
+        # aligns with support2question, used in output module to get correct index to original set of supports
+        selected_support = []
+        for j, a in enumerate(annotations):
+            if max_num_support is not None and len(a.support_tokens) > max(1, max_num_support // 2) and not is_eval:
+                # always take first (the best) and sample from rest during training, only consider half to speed
+                # things up. Following https://arxiv.org/pdf/1710.10723.pdf we sample half during training
+                selected = self._rng.sample(range(1, len(a.support_tokens)), max(1, max_num_support // 2) - 1)
+                selected = set([0] + selected)
+            else:
+                selected = set(range(len(a.support_tokens)))
+            for s in selected:
+                s_tokenized.append(a.support_tokens[s])
+                support_lengths.append(a.support_length[s])
+                wiq.append(a.word_in_question[s])
+                offsets.append(a.token_offsets[s])
+                selected_support.append(a.selected_supports[s])
+                support2question.append(j)
 
         word_chars, word_lengths, word_ids, vocab, rev_vocab = \
             preprocessing.unique_words_with_chars(q_tokenized + s_tokenized, self.char_vocab)
-
-        # aligns with support2question, used in output module to get correct index to original set of supports
-        selected_support = [selected for a in annotations for selected in a.selected_supports]
 
         question = word_ids[:len(q_tokenized)]
         support = word_ids[len(q_tokenized):]
