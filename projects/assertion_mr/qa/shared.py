@@ -1,3 +1,4 @@
+import math
 import random
 from collections import defaultdict
 from typing import *
@@ -13,7 +14,8 @@ from jack.readers.extractive_qa.util import prepare_data
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.util import preprocessing
 from jack.util.map import numpify
-from projects.assertion_mr.shared import AssertionMRPorts, AssertionStore
+from projects.assertion_mr.assertions.store import AssertionStore
+from projects.assertion_mr.shared import AssertionMRPorts
 from projects.assertion_mr.tfutil import embedding_refinement, word_with_char_embed
 
 XQAAssertionAnnotation = NamedTuple('XQAAssertionAnnotation', [
@@ -104,7 +106,8 @@ class XQAAssertionInputModule(XQAInputModule):
                     d_freqs[-1][j] += 1.0
             scores = []
             for i, d_freq in enumerate(d_freqs):
-                score = sum(v / freqs[k] * d_freq.get(k, 0.0) / freqs[k] for k, v in q_freqs.items())
+                sqr_sum = math.sqrt(sum(v / freqs[k] * v / freqs[k] for k, v in d_freq.items())) + 1e-6
+                score = sum(v / freqs[k] * d_freq.get(k, 0.0) / freqs[k] for k, v in q_freqs.items()) / sqr_sum
                 scores.append((i, score))
 
             selected_supports = [s_idx for s_idx, _ in sorted(scores, key=lambda x: -x[1])[:max_num_support]]
@@ -150,10 +153,10 @@ class XQAAssertionInputModule(XQAInputModule):
             s_lemmas.append([])
             all_spans.append([])
             if max_num_support is not None and len(a.support_tokens) > max(1, max_num_support // 2) and not is_eval:
-                # always take first (the best) and sample from rest during training, only consider half to speed
-                # things up. Following https://arxiv.org/pdf/1710.10723.pdf we sample half during training
-                selected = self._rng.sample(range(1, len(a.support_tokens)), max(1, max_num_support // 2) - 1)
-                selected = set([0] + selected)
+                # sample only half and take first with double probability (the best) to speed
+                # things up. Following https://arxiv.org/pdf/1710.10723.pdf
+                selected = self._rng.sample(range(0, len(a.support_tokens) + 1), max(1, max_num_support // 2) - 1)
+                selected = set(max(0, s - 1) for s in selected)
             else:
                 selected = set(range(len(a.support_tokens)))
             for s in selected:
@@ -200,7 +203,7 @@ class XQAAssertionInputModule(XQAInputModule):
                         lemma2idx[l] = len(lemma2idx)
                     word2lemma[support[s_offset + k][k2]] = lemma2idx[l]
 
-            assertions, assertion_args = self._assertion_store.get_assertion_keys(
+            assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
                 annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls])
             sorted_assertions = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertions = set()

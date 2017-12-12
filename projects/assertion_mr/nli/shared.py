@@ -16,7 +16,8 @@ from jack.tfutil import misc
 from jack.tfutil.rnn import fused_birnn
 from jack.util import preprocessing
 from jack.util.map import numpify
-from projects.assertion_mr.shared import AssertionMRPorts, AssertionStore
+from projects.assertion_mr.assertions.store import AssertionStore
+from projects.assertion_mr.shared import AssertionMRPorts
 from projects.assertion_mr.tfutil import embedding_refinement, word_with_char_embed
 from projects.assertion_mr.torch_util import MyCrossEntropyLoss, SingleSupportAssertionClassificationModule
 
@@ -116,7 +117,7 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
                     lemma2idx[l] = len(lemma2idx)
                 word2lemma[support[i][k]] = lemma2idx[l]
 
-            assertions, assertion_args = self._assertion_store.get_assertion_keys(
+            assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
                 annot['question_lemmas'], annot['support_lemmas'])
             sorted_assertionss = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertionss = set()
