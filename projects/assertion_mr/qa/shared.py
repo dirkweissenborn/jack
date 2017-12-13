@@ -1,6 +1,4 @@
-import math
 import random
-from collections import defaultdict
 from typing import *
 
 import numpy as np
@@ -14,6 +12,7 @@ from jack.readers.extractive_qa.util import prepare_data
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.util import preprocessing
 from jack.util.map import numpify
+from jack.util.preprocessing import sort_by_tfidf
 from projects.assertion_mr.assertions.store import AssertionStore
 from projects.assertion_mr.shared import AssertionMRPorts
 from projects.assertion_mr.tfutil import embedding_refinement, word_with_char_embed
@@ -60,12 +59,12 @@ class XQAAssertionInputModule(XQAInputModule):
 
     def __init__(self, shared_resources):
         super(XQAAssertionInputModule, self).__init__(shared_resources)
-        self.__nlp = preprocessing.spacy_nlp()
+        self._nlp = preprocessing.spacy_nlp()
         self._rng = random.Random(123)
 
     def setup(self):
-        self._assertion_store = AssertionStore(self.shared_resources.config["assertion_dir"],
-                                               self.shared_resources.config["assertion_sources"])
+        self._assertion_store = AssertionStore(self.shared_resources.config["assertion_dir"])
+        self._sources = self.shared_resources.config["assertion_sources"]
         self._limit = self.shared_resources.config.get("assertion_limit", 10)
         self.vocab = self.shared_resources.vocab
         self.config = self.shared_resources.config
@@ -91,27 +90,10 @@ class XQAAssertionInputModule(XQAInputModule):
 
         max_num_support = self.config.get("max_num_support")  # take all per default
         if max_num_support is not None and len(question.support) > max_num_support:
-            # subsample by TF-IDF
-            q_freqs = defaultdict(float)
-            freqs = defaultdict(float)
-            for w, i in zip(q_tokenized, q_ids):
-                if w.isalnum():
-                    q_freqs[i] += 1.0
-                    freqs[i] += 1.0
-            d_freqs = []
-            for i, s in enumerate(s_ids):
-                d_freqs.append(defaultdict(float))
-                for j in s:
-                    freqs[j] += 1.0
-                    d_freqs[-1][j] += 1.0
-            scores = []
-            for i, d_freq in enumerate(d_freqs):
-                sqr_sum = math.sqrt(sum(v / freqs[k] * v / freqs[k] for k, v in d_freq.items())) + 1e-6
-                score = sum(v / freqs[k] * d_freq.get(k, 0.0) / freqs[k] for k, v in q_freqs.items()) / sqr_sum
-                scores.append((i, score))
-
-            selected_supports = [s_idx for s_idx, _ in sorted(scores, key=lambda x: -x[1])[:max_num_support]]
+            scores = sort_by_tfidf(' '.join(q_tokenized), [' '.join(s) for s in s_tokenized])
+            selected_supports = [s_idx for s_idx, _ in scores[:max_num_support]]
             s_tokenized = [s_tokenized[s_idx] for s_idx in selected_supports]
+            s_lemmas = [s_lemmas[s_idx] for s_idx in selected_supports]
             s_ids = [s_ids[s_idx] for s_idx in selected_supports]
             s_length = [s_length[s_idx] for s_idx in selected_supports]
             word_in_question = [word_in_question[s_idx] for s_idx in selected_supports]
@@ -153,9 +135,19 @@ class XQAAssertionInputModule(XQAInputModule):
             s_lemmas.append([])
             all_spans.append([])
             if max_num_support is not None and len(a.support_tokens) > max(1, max_num_support // 2) and not is_eval:
-                # sample only half and take first with double probability (the best) to speed
+                # sample only 2 paragraphs and take first with double probability (the best) to speed
                 # things up. Following https://arxiv.org/pdf/1710.10723.pdf
-                selected = self._rng.sample(range(0, len(a.support_tokens) + 1), max(1, max_num_support // 2) - 1)
+                num_training_paragraphs = self.config.get('num_training_paragraphs', 2)
+                is_done = False
+                any_answer = any(a.answer_spans)
+                # sample until there is at least one possible answer (if any)
+                while not is_done:
+                    selected = self._rng.sample(range(0, len(a.support_tokens) + 1), num_training_paragraphs + 1)
+                    if 0 in selected and 1 in selected:
+                        selected = [s - 1 for s in selected if s > 0]
+                    else:
+                        selected = [max(0, s - 1) for s in selected[:num_training_paragraphs]]
+                    is_done = not any_answer or any(a.answer_spans[s] for s in selected)
                 selected = set(max(0, s - 1) for s in selected)
             else:
                 selected = set(range(len(a.support_tokens)))
@@ -204,13 +196,13 @@ class XQAAssertionInputModule(XQAInputModule):
                     word2lemma[support[s_offset + k][k2]] = lemma2idx[l]
 
             assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
-                annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls])
+                annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls], self._sources)
             sorted_assertions = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertions = set()
             for key, _ in sorted_assertions:
                 if len(added_assertions) == self._limit:
                     break
-                a = self.__nlp(self._assertion_store.get_assertion(key))
+                a = self._nlp(self._assertion_store.get_assertion(key))
                 a_lemma = " ".join(t.lemma_ for t in a)
                 if a_lemma in added_assertions:
                     continue
@@ -408,17 +400,16 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                 answer_layer_config['repr_dim'] = repr_dim
 
             beam_size = tf.get_variable(
-                'beam_size', initializer=answer_layer_config.get('beam_size', 1.0), dtype=tf.float32)
-            beam_size_p = tf.placeholder(tf.float32, [], 'beam_size_setter')
+                'beam_size', initializer=answer_layer_config.get('beam_size', 1), dtype=tf.int32, trainable=False)
+            beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
             beam_size_assign = beam_size.assign(beam_size_p)
             self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
-            answer_layer_config['beam_size'] = beam_size
 
             start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
                 answer_layer(encoded_question, tensors.question_length, encoded_support,
                              tensors.support_length,
                              tensors.support2question, tensors.answer2support, tensors.is_eval,
-                             tensors.correct_start, **answer_layer_config)
+                             tensors.correct_start, beam_size=beam_size, **answer_layer_config)
 
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 

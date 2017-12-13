@@ -24,7 +24,7 @@ def extract_assertions(abstracts, labels, store):
             logger.info('%d assertions added' % counter)
         sentence_end = abstract.find('. ')
         if sentence_end > 0:
-            assertion = abstract[sentence_end]
+            assertion = abstract[:sentence_end]
         else:
             assertion = abstract
         subjects = []
@@ -54,7 +54,6 @@ if __name__ == '__main__':
     FLAGS = tf.app.flags.FLAGS
     store = AssertionStore(FLAGS.assertion_store_path, True)
 
-
     def simple_parse(fn):
         d = defaultdict(list)
         with BZ2File(fn) as f:
@@ -74,19 +73,32 @@ if __name__ == '__main__':
         return d
 
 
-    logger.info('Loading DBpedia Data')
+    logger.info('Loading DBpedia labels')
     labels = simple_parse(FLAGS.dbpedia_labels)
+
+    # reg = r'( )?\([^)]+\)'
+    # for k, vs in labels.items():
+    #    for v in vs:
+    #        if '(' in v:
+    #            labels[k].append(re.sub(reg, '', v))
+
+    logger.info('Loading DBpedia abstracts')
     abstracts = simple_parse(FLAGS.dbpedia_short_abstracts)
+    logger.info('Loading DBpedia disambiguations')
     disambiguations = simple_parse(FLAGS.dbpedia_disambiguates)
+    logger.info('Loading DBpedia redirects')
     transitive_redirects = simple_parse(FLAGS.dbpedia_transitive_redirect)
 
+    logger.info('Extending DBpedia labels with redirects and disambiguations')
+    labels_ext = defaultdict(set)
+    labels_ext.update((k, set(vs)) for k, vs in labels.items())
     for k, vs in disambiguations.items():
         for v in vs:
-            labels[v].append(labels.get(k, [uncamel(k).replace('_', ' ')])[0])
+            labels_ext[v].add(labels.get(k, [uncamel(k).replace('_', ' ')])[0])
     for k, vs in disambiguations.items():
         for v in vs:
-            labels[k].append(labels.get(v, [uncamel(v).replace('_', ' ')])[0])
+            labels_ext[k].add(labels.get(v, [uncamel(v).replace('_', ' ')])[0])
 
     logger.info('Writing first wikipedia sentences as assertions...')
-    extract_assertions(abstracts, labels, store)
+    extract_assertions(abstracts, labels_ext, store)
     store.save()

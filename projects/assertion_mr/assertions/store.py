@@ -94,14 +94,14 @@ class AssertionStore(object):
         return assertions, assertion_args
 
     def assertion_keys_for_subject(self, subj, resource='default'):
-        return self._subject2assertions[resource].get(subj)
+        return self._subject2assertions[resource].get(subj, [])
 
     def assertion_keys_for_object(self, subj, resource='default'):
-        return self._object2assertions[resource].get(subj)
+        return self._object2assertions[resource].get(subj, [])
 
-    def get_assertion(self, assertion_key, resource):
-        resource, key = assertion_key.split('$', 2)
-        return self._assertion_db[resource].get(key)
+    def get_assertion(self, assertion_key):
+        resource = assertion_key[:assertion_key.index('$')]
+        return self._assertion_db[resource].get(assertion_key)
 
     def add_assertion(self, assertion, subjects, objects, resource='default', key=None):
         assert '$' not in resource
@@ -130,7 +130,7 @@ class AssertionStore(object):
     def save(self):
         for key in self._object2assertions:
             with open(os.path.join(self._path, 'object2assertions', key), 'wb') as f:
-                pickle.dump(self._object2assertions, f)
+                pickle.dump(self._object2assertions[key], f)
             with open(os.path.join(self._path, 'subject2assertions', key), 'wb') as f:
-                pickle.dump(self._subject2assertions, f)
+                pickle.dump(self._subject2assertions[key], f)
             self._assertion_db[key].sync()

@@ -11,10 +11,11 @@ assertion_limit: 50
 assertion_sources: ['conceptnet']
 
 reading_module:
-  - input: 'text'
-    module: 'lstm'
-    with_projection: True
-    activation: relu
+- input: 'text'
+  module: 'lstm'
+  name: 'reading'
+  with_projection: True
+  activation: relu
 
 dropout: &dropout 0.2
 

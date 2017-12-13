@@ -6,19 +6,21 @@ parent_config: './conf/qa/jack_qa_light.yaml'
 name: 'bilstm_assertion_reader'
 reader: 'modular_assertion_qa_reader'
 
-assertion_dir: '/data/assertion_shelve'
+assertion_dir: '/data/assertion_store'
 assertion_limit: 50
 assertion_sources: ['conceptnet']
 no_reading: False
 
 reading_module:
-  - input: 'text'
-    module: 'lstm'
-    with_projection: True
-    activation: 'relu'
+- input: 'text'
+  module: 'lstm'
+  name: 'reading'
+  with_projection: True
+  activation: 'relu'
 
 dropout: &dropout 0.2
 repr_dim: 150
+max_span_size: 16
 
 # To be fast we have to restrict the use of RNNs as much as possible and use convolutions instead
 model:
@@ -33,16 +35,17 @@ model:
 
   - input: 'support'
     module: 'lstm'
+    name: 'encoder'
+    activation: 'tanh'
     with_projection: True
-    activation: 'relu'
     dropout: *dropout
 
   - input: 'question'
     module: 'lstm'
+    name: 'encoder'
     with_projection: True
-    activation: 'relu'
+    activation: 'tanh'
     dropout: *dropout
 
   answer_layer:
     module: 'mlp'
-    max_span_size: 16

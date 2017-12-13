@@ -88,17 +88,14 @@ class TFModelModule(ModelModule):
         """
         raise NotImplementedError
 
-    def setup(self, is_training=True):
+    def setup(self, is_training=True, reuse=False):
         """Sets up the module.
 
         This usually involves creating the actual tensorflow graph. It is expected to be called after the input module
         is set up and shared resources, such as the vocab, config, etc., are prepared already at this point.
         """
-        old_train_variables = tf.trainable_variables()
-        old_variables = tf.global_variables()
-
-        with tf.variable_scope(self.shared_resources.config.get("name", "jtreader"),
-                               initializer=tf.contrib.layers.xavier_initializer()):
+        name = self.shared_resources.config.get("name", "jtreader")
+        with tf.variable_scope(name, initializer=tf.contrib.layers.xavier_initializer(), reuse=reuse):
             self._tensors = {p: p.create_placeholder() for p in self.input_ports}
             output_tensors = self.create_output(
                 self.shared_resources, {port: self._tensors[port] for port in self.input_ports})
@@ -114,9 +111,9 @@ class TFModelModule(ModelModule):
                 training_output_tensors = self.create_training_output(
                     self.shared_resources, {port: input_target_tensors[port] for port in self.training_input_ports})
                 self._tensors.update(training_output_tensors)
-        self._training_variables = [v for v in tf.trainable_variables() if v not in old_train_variables]
+        self._training_variables = [v for v in tf.trainable_variables() if v.name.startswith(name)]
         self._saver = tf.train.Saver(self._training_variables, max_to_keep=1)
-        self._variables = [v for v in tf.global_variables() if v not in old_variables]
+        self._variables = [v for v in tf.global_variables() if v.name.startswith(name)]
         self.tf_session.run([v.initializer for v in self.variables])
 
         # Sometimes we want to initialize (partially) with a pre-trained model
@@ -137,7 +134,8 @@ class TFModelModule(ModelModule):
                         init_vars.append(v)
                         break
                 if not found:
-                    logger.warn("Could not find variable", n, "in computation graph to restore from pretrained model.")
+                    logger.warn(
+                        "Could not find variable " + n + " in computation graph to restore from pretrained model.")
 
             saver = tf.train.Saver(init_vars)
             saver.restore(self.tf_session, load_dir)
