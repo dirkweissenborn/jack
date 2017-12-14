@@ -400,6 +400,8 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
 
             if 'repr_dim' not in answer_layer_config:
                 answer_layer_config['repr_dim'] = repr_dim
+            if 'max_span_size' not in answer_layer_config:
+                answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
 
             beam_size = tf.get_variable(
                 'beam_size', initializer=answer_layer_config.get('beam_size', 1), dtype=tf.int32, trainable=False)

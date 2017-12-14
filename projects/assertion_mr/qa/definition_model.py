@@ -8,6 +8,7 @@ from jack.readers.extractive_qa.tensorflow.abstract_model import AbstractXQAMode
 from jack.readers.extractive_qa.tensorflow.answer_layer import answer_layer
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.util.map import numpify
+from jack.util.preprocessing import sort_by_tfidf
 from projects.assertion_mr.qa.shared import XQAAssertionInputModule
 from projects.assertion_mr.shared import AssertionMRPorts
 from projects.assertion_mr.tfutil import word_with_char_embed, embedding_refinement
@@ -76,20 +77,31 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
             j = i // beam_size
             if i % beam_size == 0:
                 seen_answer_lemmas = set()
+            doc_idx_map = [i for i, q_id in enumerate(batch[XQAPorts.support2question]) if q_id == j]
             doc_idx, start, end = s[0], s[1], s[2]
-            answer_token_ids = support[doc_idx, start:end + 1]
+            answer_token_ids = support[doc_idx_map[doc_idx], start:end + 1]
             answer_lemma = ' '.join(rev_lemma_vocab[word2lemma[idd]] for idd in answer_token_ids)
             if answer_lemma in seen_answer_lemmas:
                 continue
             seen_answer_lemmas.add(answer_lemma)
             ks = self._underlying_input_module._assertion_store.assertion_keys_for_subject(
                 answer_lemma, resource='wikipedia_firstsent')
+            print(end - start)
+            print(answer_lemma)
+            defns = []
             for key in ks:
-                defn = self._underlying_input_module._assertion_store.get_assertion(key)
+                defns.append(self._underlying_input_module._assertion_store.get_assertion(key))
+            if defns:
+                if len(defns) > 0:
+                    indices_scores = sort_by_tfidf(' '.join(annotations[j].support_tokens[doc_idx]), defns)
+                    # only select definition with best match to the support
+                    defn = defns[indices_scores[0][0]]
+                else:
+                    defn = defns[0]
+                print(defn)
                 defn = self._underlying_input_module._nlp(defn)
                 definition_lengths.append(len(defn))
                 definition2question.append(j)
-
                 defn_ids = []
                 for t in defn:
                     w = t.orth_
@@ -217,6 +229,8 @@ class ModularAssertionDefinitionQAModel(AbstractXQAModelModule):
 
             if 'repr_dim' not in answer_layer_config:
                 answer_layer_config['repr_dim'] = repr_dim
+            if 'max_span_size' not in answer_layer_config:
+                answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
 
             beam_size = tf.get_variable(
                 'beam_size', initializer=answer_layer_config.get('beam_size', 1), dtype=tf.int32, trainable=False)
