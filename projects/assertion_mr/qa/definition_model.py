@@ -90,7 +90,7 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
             for key in ks:
                 defns.append(self._underlying_input_module._assertion_store.get_assertion(key))
             if defns:
-                if len(defns) > 0:
+                if len(defns) > 1:
                     indices_scores = sort_by_tfidf(' '.join(annotations[j].support_tokens[doc_idx]), defns)
                     # only select definition with best match to the support
                     defn = defns[indices_scores[0][0]]
@@ -230,17 +230,16 @@ class ModularAssertionDefinitionQAModel(AbstractXQAModelModule):
                 answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
 
             beam_size = tf.get_variable(
-                'beam_size', initializer=answer_layer_config.get('beam_size', 1), dtype=tf.int32, trainable=False)
+                'beam_size', initializer=shared_resources.config.get('beam_size', 1), dtype=tf.int32, trainable=False)
             beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
             beam_size_assign = beam_size.assign(beam_size_p)
             self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
-            answer_layer_config['beam_size'] = beam_size
 
             start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
                 answer_layer(encoded_question, tensors.question_length, encoded_support,
                              tensors.support_length,
                              tensors.support2question, tensors.answer2support, tensors.is_eval,
-                             tensors.correct_start, **answer_layer_config)
+                             tensors.correct_start, beam_size=beam_size, **answer_layer_config)
 
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 

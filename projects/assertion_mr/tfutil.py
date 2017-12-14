@@ -47,16 +47,8 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
             num_seq = tf.shape(length)[0]
 
             def non_zero_batchsize_op():
-                with tf.device('/cpu:0'):
-                    affected_words, new_seq = tf.unique(tf.reshape(seq, [-1]))
-                    new_seq = tf.reshape(new_seq, tf.shape(seq))
-                    affected_word2lemma = tf.gather(word2lemma_off, affected_words)
-                    unique_affected_lemmas, affected_word2lemmas = tf.unique(affected_word2lemma)
-                    seq_lemmas = tf.gather(affected_word2lemmas, tf.reshape(new_seq, [-1]))
-
-                affected_embeddings = tf.gather(ctxt_word_embeddings, affected_words)
                 max_length = tf.shape(seq)[1]
-                encoded = tf.nn.embedding_lookup(affected_embeddings, new_seq)
+                encoded = tf.nn.embedding_lookup(ctxt_word_embeddings, seq)
                 one_hot = [0.0] * num_sequences
                 one_hot[i] = 1.0
                 mode_feature = tf.constant([[one_hot]], tf.float32)
@@ -68,15 +60,12 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
                 mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
                 encoded = encoded * tf.expand_dims(mask, 2)
 
+                seq_lemmas = tf.gather(word2lemma_off, tf.reshape(seq, [-1]))
                 new_lemma_embeddings = tf.unsorted_segment_max(
-                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.shape(unique_affected_lemmas)[0])
+                    tf.reshape(encoded, [-1, size]), seq_lemmas, tf.reduce_max(word2lemma_off) + 1)
                 new_lemma_embeddings = tf.nn.relu(new_lemma_embeddings)
 
-                affected_embeddings = tf.gather(new_lemma_embeddings, affected_word2lemmas)
-                new_ctxt_word_embeddings = tf.unsorted_segment_sum(
-                    affected_embeddings, affected_words, num_words * batch_size)
-
-                return new_ctxt_word_embeddings
+                return tf.gather(new_lemma_embeddings, word2lemma_off)
 
             new_word_embeddings = tf.cond(num_seq > 0, non_zero_batchsize_op,
                                           lambda: tf.zeros_like(ctxt_word_embeddings))

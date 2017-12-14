@@ -15,6 +15,8 @@ class AssertionStore(object):
         self._num_assertions = 0
         self._writeback = writeback
 
+        self._assertion_cache = dict()
+
         if os.path.exists(os.path.join(path, 'object2assertions')):
             for fn in os.listdir(os.path.join(path, 'object2assertions')):
                 with open(os.path.join(path, 'object2assertions', fn), 'rb') as f:
@@ -25,6 +27,7 @@ class AssertionStore(object):
             for fn in os.listdir(os.path.join(path, 'assertions')):
                 self._assertion_db[fn] = shelve.open(
                     os.path.join(path, 'assertions', fn), flag='c' if writeback else 'r', writeback=writeback)
+                self._assertion_cache[fn] = dict()
                 self._num_assertions += len(self._assertion_db[fn])
         else:
             os.makedirs(os.path.join(path, 'object2assertions'))
@@ -134,7 +137,11 @@ class AssertionStore(object):
 
     def get_assertion(self, assertion_key):
         resource = assertion_key[:assertion_key.index('$')]
-        return self._assertion_db[resource].get(assertion_key)
+        ret = self._assertion_cache[resource].get(assertion_key)
+        if ret is None:
+            ret = self._assertion_db[resource].get(assertion_key)
+            self._assertion_cache[resource][assertion_key] = ret
+        return ret
 
     def add_assertion(self, assertion, subjects, objects, resource='default', key=None):
         assert '$' not in resource
@@ -145,6 +152,7 @@ class AssertionStore(object):
             self._assertion_db[resource] = shelve.open(
                 os.path.join(self._path, 'assertions', resource), flag='c' if self._writeback else 'r',
                 writeback=self._writeback)
+            self._assertion_cache[resource] = dict()
         o2a = self._object2assertions[resource]
         s2a = self._subject2assertions[resource]
         for o in objects:

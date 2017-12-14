@@ -214,7 +214,7 @@ def modular_assertion_qa_reader(resources_or_conf: Union[dict, SharedResources] 
 
     input_module = XQAAssertionInputModule(shared_resources)
     model_module = ModularAssertionQAModel(shared_resources)
-    output_module = XQAOutputModule(shared_resources)
+    output_module = XQAOutputModule()
     return TFReader(shared_resources, input_module, model_module, output_module)
 
 
@@ -227,7 +227,7 @@ def modular_assertion_definition_qa_reader(resources_or_conf: Union[dict, Shared
 
     input_module = XQAAssertionInputModule(shared_resources)
     model_module = ModularAssertionQAModel(shared_resources)
-    output_module = XQAOutputModule(shared_resources)
+    output_module = XQAOutputModule()
     reader = TFReader(shared_resources, input_module, model_module, output_module)
     input_module = XQAAssertionDefinitionInputModule(reader)
     model_module = ModularAssertionDefinitionQAModel(model_module)

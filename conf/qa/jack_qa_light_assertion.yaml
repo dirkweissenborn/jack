@@ -37,7 +37,7 @@ model:
     activation: 'tanh'
     dropout: *dropout
 
-    # Shared Contextual Encoding
+  # Shared Contextual Encoding
   - input: 'emb_support'
     output: 'support'
     module: 'conv_glu'

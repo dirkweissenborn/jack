@@ -418,7 +418,7 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                 answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
 
             beam_size = tf.get_variable(
-                'beam_size', initializer=answer_layer_config.get('beam_size', 1), dtype=tf.int32, trainable=False)
+                'beam_size', initializer=shared_resources.config.get('beam_size', 1), dtype=tf.int32, trainable=False)
             beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
             beam_size_assign = beam_size.assign(beam_size_p)
             self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
