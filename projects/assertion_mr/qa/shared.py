@@ -88,8 +88,11 @@ class XQAAssertionInputModule(XQAInputModule):
             with_answers=has_answers, max_support_length=self.config.get("max_support_length", None),
             spacy_nlp=True, with_lemmas=True)
 
-        max_num_support = self.config.get("max_num_support")  # take all per default
-        if max_num_support is not None and len(question.support) > max_num_support:
+        max_num_support = self.config.get("max_num_support", len(question.support))  # take all per default
+
+        # take max supports by TF-IDF (we subsample to max_num_support in create batch)
+        # following https://arxiv.org/pdf/1710.10723.pdf
+        if len(question.support) > 1:
             scores = sort_by_tfidf(' '.join(q_tokenized), [' '.join(s) for s in s_tokenized])
             selected_supports = [s_idx for s_idx, _ in scores[:max_num_support]]
             s_tokenized = [s_tokenized[s_idx] for s_idx in selected_supports]
@@ -121,7 +124,7 @@ class XQAAssertionInputModule(XQAInputModule):
         q_tokenized = [a.question_tokens for a in annotations]
         question_lengths = [a.question_length for a in annotations]
 
-        max_num_support = self.config.get("max_num_support")  # take all per default
+        max_training_support = self.config.get('max_training_support', 2)
         s_tokenized = []
         s_lemmas = []
         support_lengths = []
@@ -134,19 +137,18 @@ class XQAAssertionInputModule(XQAInputModule):
         for i, a in enumerate(annotations):
             s_lemmas.append([])
             all_spans.append([])
-            if max_num_support is not None and len(a.support_tokens) > max(1, max_num_support // 2) and not is_eval:
+            if len(a.support_tokens) > max_training_support > 0 and not is_eval:
                 # sample only 2 paragraphs and take first with double probability (the best) to speed
                 # things up. Following https://arxiv.org/pdf/1710.10723.pdf
-                num_training_paragraphs = self.config.get('num_training_paragraphs', 2)
                 is_done = False
                 any_answer = any(a.answer_spans)
                 # sample until there is at least one possible answer (if any)
                 while not is_done:
-                    selected = self._rng.sample(range(0, len(a.support_tokens) + 1), num_training_paragraphs + 1)
+                    selected = self._rng.sample(range(0, len(a.support_tokens) + 1), max_training_support + 1)
                     if 0 in selected and 1 in selected:
                         selected = [s - 1 for s in selected if s > 0]
                     else:
-                        selected = [max(0, s - 1) for s in selected[:num_training_paragraphs]]
+                        selected = [max(0, s - 1) for s in selected[:max_training_support]]
                     is_done = not any_answer or any(a.answer_spans[s] for s in selected)
                 selected = set(max(0, s - 1) for s in selected)
             else:
