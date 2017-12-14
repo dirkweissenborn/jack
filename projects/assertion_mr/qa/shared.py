@@ -183,7 +183,7 @@ class XQAAssertionInputModule(XQAInputModule):
 
         word2lemma = [None] * len(rev_vocab)
 
-        # we have to create batches here and cannot precompute them because of the batch-specific wiq feature
+        heuristic = self.config.get('heuristic', 'pair')
         s_offset = 0
         for i, annot in enumerate(annotations):
             # collect uniq lemmas:
@@ -197,8 +197,21 @@ class XQAAssertionInputModule(XQAInputModule):
                         lemma2idx[l] = len(lemma2idx)
                     word2lemma[support[s_offset + k][k2]] = lemma2idx[l]
 
-            assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
-                annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls], self._sources)
+            if self._limit == 0:
+                s_offset += len(s_lemmas[i])
+                continue
+
+            if heuristic == 'pair':
+                assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
+                    annot.question_lemmas, [l for ls in s_lemmas[i] for l in ls], self._sources)
+            elif heuristic == 'tfidf':
+                assertions, assertion_args = self._assertion_store.get_assertion_keys(
+                    [l for ls in s_lemmas[i] for l in ls], self._sources)
+                assertions = list(assertions.keys())
+                assertion_strings = [self._assertion_store.get_assertion(key) for key in assertions]
+                scores = sort_by_tfidf(' '.join(annot.question_tokens), assertion_strings)
+                assertions = {assertions[i]: s for i, s in scores}
+
             sorted_assertions = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertions = set()
             for key, _ in sorted_assertions:
@@ -212,26 +225,27 @@ class XQAAssertionInputModule(XQAInputModule):
                     added_assertions.add(a_lemma)
                 ass2question.append(i)
                 ass_lengths.append(len(a))
-                q_arg_span = assertion_args[key][0]
-                q_arg_span = (i, q_arg_span[0], q_arg_span[1])
-                s_arg_start, s_arg_end = assertion_args[key][1]
-                doc_idx = 0
-                for ls in s_lemmas[i]:
-                    if s_arg_start < len(ls):
-                        break
-                    else:
-                        doc_idx += 1
-                        s_arg_start -= len(ls)
-                        s_arg_end -= len(ls)
-                s_arg_span = (s_offset + doc_idx, s_arg_start, s_arg_end)
-                if q_arg_span not in question_arg_span_idx:
-                    question_arg_span_idx[q_arg_span] = len(question_arg_span)
-                    question_arg_span.append(assertion_args[key][0])
-                if s_arg_span not in support_arg_span_idx:
-                    support_arg_span_idx[s_arg_span] = len(support_arg_span)
-                    support_arg_span.append(assertion_args[key][1])
-                assertion2question_arg_span.append(question_arg_span_idx[q_arg_span])
-                assertion2support_arg_span.append(support_arg_span_idx[s_arg_span])
+                if heuristic == 'pair':
+                    q_arg_span = assertion_args[key][0]
+                    q_arg_span = (i, q_arg_span[0], q_arg_span[1])
+                    s_arg_start, s_arg_end = assertion_args[key][1]
+                    doc_idx = 0
+                    for ls in s_lemmas[i]:
+                        if s_arg_start < len(ls):
+                            break
+                        else:
+                            doc_idx += 1
+                            s_arg_start -= len(ls)
+                            s_arg_end -= len(ls)
+                    s_arg_span = (s_offset + doc_idx, s_arg_start, s_arg_end)
+                    if q_arg_span not in question_arg_span_idx:
+                        question_arg_span_idx[q_arg_span] = len(question_arg_span)
+                        question_arg_span.append(assertion_args[key][0])
+                    if s_arg_span not in support_arg_span_idx:
+                        support_arg_span_idx[s_arg_span] = len(support_arg_span)
+                        support_arg_span.append(assertion_args[key][1])
+                    assertion2question_arg_span.append(question_arg_span_idx[q_arg_span])
+                    assertion2support_arg_span.append(support_arg_span_idx[s_arg_span])
 
                 u_ass = []
                 for t in a:

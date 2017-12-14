@@ -93,6 +93,39 @@ class AssertionStore(object):
                         assertion_args[a] = [start2, end2], [start, end]
         return assertions, assertion_args
 
+    def get_assertion_keys(self, tokens, resources):
+        """Returns: mapping from assertion keys to IDF scores."""
+
+        def key_iterator(tokens):
+            for i in range(len(tokens)):
+                for j in range(i + 1, min(i + 6, len(tokens) + 1)):
+                    if tokens[j - 1] not in self._sws and tokens[j - 1].isalnum():
+                        yield tokens[i:j], i, j
+
+        assertions = dict()
+        assertion_args = dict()
+        keys = set()
+        for ks, start, end in key_iterator(tokens):
+            k = ' '.join(ks)
+            if k in keys:
+                continue
+            keys.add(k)
+            for source in resources:
+                k_assertions = self._object2assertions[source].get(k)
+                if k_assertions is not None:
+                    idf = 1.0 / len(k_assertions)
+                    for a in k_assertions:
+                        assertions[a] = max(assertions.get(a, 0.0), idf)
+                        assertion_args[a] = [start, end]
+                k_assertions = self._subject2assertions[source].get(k)
+                if k_assertions is not None:
+                    idf = 1.0 / len(k_assertions)
+                    for a in k_assertions:
+                        assertions[a] = max(assertions.get(a, 0.0), idf)
+                        assertion_args[a] = [start, end]
+
+        return assertions, assertion_args
+
     def assertion_keys_for_subject(self, subj, resource='default'):
         return self._subject2assertions[resource].get(subj, [])
 

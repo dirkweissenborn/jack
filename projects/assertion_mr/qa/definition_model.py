@@ -86,8 +86,6 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
             seen_answer_lemmas.add(answer_lemma)
             ks = self._underlying_input_module._assertion_store.assertion_keys_for_subject(
                 answer_lemma, resource='wikipedia_firstsent')
-            print(end - start)
-            print(answer_lemma)
             defns = []
             for key in ks:
                 defns.append(self._underlying_input_module._assertion_store.get_assertion(key))
@@ -98,7 +96,6 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
                     defn = defns[indices_scores[0][0]]
                 else:
                     defn = defns[0]
-                print(defn)
                 defn = self._underlying_input_module._nlp(defn)
                 definition_lengths.append(len(defn))
                 definition2question.append(j)

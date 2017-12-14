@@ -11,6 +11,8 @@ assertion_limit: 50
 assertion_sources: ['conceptnet']
 no_reading: False
 
+heuristic: 'pair'
+
 reading_module:
 - input: 'text'
   module: 'lstm'
