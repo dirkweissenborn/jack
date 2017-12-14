@@ -1,7 +1,7 @@
 description: >
   Jack QA light with assertions.
 
-parent_config: './conf/qa/jack_qa_light.yaml'
+parent_config: './conf/qa/abstract_qa.yaml'
 
 name: 'jack_qa_light_assertion_reader'
 reader: 'modular_assertion_qa_reader'
