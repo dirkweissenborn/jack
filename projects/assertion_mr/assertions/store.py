@@ -135,12 +135,13 @@ class AssertionStore(object):
     def assertion_keys_for_object(self, subj, resource='default'):
         return self._object2assertions[resource].get(subj, [])
 
-    def get_assertion(self, assertion_key):
+    def get_assertion(self, assertion_key, cache=False):
         resource = assertion_key[:assertion_key.index('$')]
         ret = self._assertion_cache[resource].get(assertion_key)
         if ret is None:
             ret = self._assertion_db[resource].get(assertion_key)
-            self._assertion_cache[resource][assertion_key] = ret
+            if cache:
+                self._assertion_cache[resource][assertion_key] = ret
         return ret
 
     def add_assertion(self, assertion, subjects, objects, resource='default', key=None):

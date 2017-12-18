@@ -217,7 +217,7 @@ class XQAAssertionInputModule(XQAInputModule):
             for key, _ in sorted_assertions:
                 if len(added_assertions) == self._limit:
                     break
-                a = self._nlp(self._assertion_store.get_assertion(key))
+                a = self._nlp(self._assertion_store.get_assertion(key, cache=True))
                 a_lemma = " ".join(t.lemma_ for t in a)
                 if a_lemma in added_assertions:
                     continue
