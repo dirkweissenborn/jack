@@ -2,13 +2,13 @@ import os
 import pickle
 import shelve
 
-from nltk.corpus import stopwords
+import spacy
 
 
 class AssertionStore(object):
     def __init__(self, path, writeback=False):
         self._path = path
-        self._sws = set(stopwords.words('english'))
+        self._sws = spacy.en.STOP_WORDS
         self._assertion_db = dict()
         self._object2assertions = dict()
         self._subject2assertions = dict()

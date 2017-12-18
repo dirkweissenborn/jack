@@ -22,9 +22,38 @@ dropout: &dropout 0.2
 repr_dim: 150
 max_span_size: 16
 
-# To be fast we have to restrict the use of RNNs as much as possible and use convolutions instead
 model:
   encoder_layer:
+
+  - input: 'support'
+    module: 'dense'
+    activation: 'tanh'
+    name: 'embedding_projection'
+
+  - input: 'support'
+    output: 'support_conv'
+    module: 'conv_glu'
+    conv_width: 5
+    num_layers: 1
+
+  - input: ['support', 'support_conv']
+    output: 'support'
+    module: 'concat'
+
+  - input: 'question'
+    module: 'dense'
+    activation: 'tanh'
+    name: 'embedding_projection'
+
+  - input: 'question'
+    output: 'question_conv'
+    module: 'conv_glu'
+    conv_width: 5
+    num_layers: 1
+
+  - input: ['question', 'question_conv']
+    output: 'question'
+    module: 'concat'
 
   - input: 'support'
     dependent: 'question'

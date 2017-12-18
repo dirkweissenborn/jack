@@ -398,7 +398,8 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                                              name='embedded_support')
 
         inputs = {'question': emb_question, 'support': emb_support,
-                  'word_in_question': tf.expand_dims(tensors.word_in_question, 2)}
+                  'word_in_question': tf.expand_dims(tensors.word_in_question, 2),
+                  'question_ones': tf.expand_dims(tf.ones(tf.shape(emb_question)[:2], tf.float32), 2)}
         inputs_length = {'question': question_length, 'support': support_length,
                          'word_in_question': support_length}
         inputs_mapping = {'question': None, 'support': support2question}
