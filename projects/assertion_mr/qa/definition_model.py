@@ -89,15 +89,13 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
                 seen_answer_lemmas.add(answer_lemma)
                 ks = self._assertion_store.assertion_keys_for_subject(answer_lemma, resource='wikipedia_firstsent')
 
-            defns = []
-            for key in ks:
-                defns.append(self._nlp(self._assertion_store.get_assertion(key)))
-                if len(defns) > 3:
-                    indices_scores = sort_by_tfidf(
-                        ' '.join(annotations[j].question_lemmas + annotations[j].support_lemmas[doc_idx]),
-                        [' '.join(t.lemma_ for t in d) for d in defns])
-                    # only select the top 3 definition with best match to the support and question
-                    defns = [defns[i] for i, _ in indices_scores[:3]]
+            defns = [self._nlp(self._assertion_store.get_assertion(key)) for key in ks]
+            if len(defns) > 3:
+                indices_scores = sort_by_tfidf(
+                    ' '.join(annotations[j].question_lemmas + annotations[j].support_lemmas[doc_idx]),
+                    [' '.join(t.lemma_ for t in d) for d in defns])
+                # only select the top 3 definition with best match to the support and question
+                defns = [defns[i] for i, _ in indices_scores[:3]]
 
             for defn in defns:
                 definition_lengths.append(len(defn))
