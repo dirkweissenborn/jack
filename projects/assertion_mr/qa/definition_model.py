@@ -29,6 +29,7 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
         self.reader = reader
         self._underlying_input_module = reader.input_module
         assert isinstance(self._underlying_input_module, XQAAssertionInputModule)
+        super(XQAAssertionDefinitionInputModule, self).__init__(reader.shared_resources)
 
     @property
     def output_ports(self):
