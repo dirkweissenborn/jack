@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+import spacy
 import tensorflow as tf
 
 from jack.core import TensorPortWithDefault, TensorPortTensors, TensorPort
@@ -26,6 +27,7 @@ class DefinitionPorts:
 
 
 class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
+
     def setup(self):
         super().setup()
         self._rng = random.Random(1)
@@ -69,11 +71,24 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
             doc_idx_map = [i for i, q_id in enumerate(batch[XQAPorts.support2question]) if q_id == j]
             doc_idx, start, end = s[0], s[1], s[2]
             answer_token_ids = support[doc_idx_map[doc_idx], start:end + 1]
-            answer_lemma = ' '.join(rev_lemma_vocab[word2lemma[idd]] for idd in answer_token_ids)
+            answer_lemmas = [rev_lemma_vocab[word2lemma[idd]] for idd in answer_token_ids]
+            answer_lemma = ' '.join(answer_lemmas)
             if answer_lemma in seen_answer_lemmas:
                 continue
             seen_answer_lemmas.add(answer_lemma)
             ks = self._assertion_store.assertion_keys_for_subject(answer_lemma, resource='wikipedia_firstsent')
+            if not ks:
+                # remove leading or trailing stop words or non alnum words
+                while answer_lemmas and (answer_lemmas[0] in spacy.en.STOP_WORDS or not answer_lemmas[0].isalnum()):
+                    answer_lemmas = answer_lemmas[1:]
+                while answer_lemmas and (answer_lemmas[-1] in spacy.en.STOP_WORDS or not answer_lemmas[-1].isalnum()):
+                    answer_lemmas = answer_lemmas[:-1]
+                answer_lemma = ' '.join(answer_lemmas)
+                if answer_lemma in seen_answer_lemmas:
+                    continue
+                seen_answer_lemmas.add(answer_lemma)
+                ks = self._assertion_store.assertion_keys_for_subject(answer_lemma, resource='wikipedia_firstsent')
+
             defns = []
             for key in ks:
                 defns.append(self._nlp(self._assertion_store.get_assertion(key)))

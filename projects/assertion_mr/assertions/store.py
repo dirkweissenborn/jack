@@ -130,10 +130,10 @@ class AssertionStore(object):
         return assertions, assertion_args
 
     def assertion_keys_for_subject(self, subj, resource='default'):
-        return self._subject2assertions[resource].get(subj, [])
+        return self._subject2assertions[resource].get(subj, set())
 
     def assertion_keys_for_object(self, subj, resource='default'):
-        return self._object2assertions[resource].get(subj, [])
+        return self._object2assertions[resource].get(subj, set())
 
     def get_assertion(self, assertion_key, cache=False):
         resource = assertion_key[:assertion_key.index('$')]
@@ -158,14 +158,12 @@ class AssertionStore(object):
         s2a = self._subject2assertions[resource]
         for o in objects:
             if o not in o2a:
-                o2a[o] = [key]
-            else:
-                o2a[o].append(key)
+                o2a[o] = set()
+            o2a[o].add(key)
         for s in subjects:
             if s not in s2a:
-                s2a[s] = [key]
-            else:
-                s2a[s].append(key)
+                s2a[s] = set()
+            s2a[s].add(key)
         self._assertion_db[resource][key] = assertion
         self._num_assertions += 1
 
