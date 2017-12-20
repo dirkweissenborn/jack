@@ -41,10 +41,10 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
             DefinitionPorts.definitions, DefinitionPorts.definition_lengths, DefinitionPorts.definition2question]
 
     def create_batch(self, annotations, is_eval, with_answers):
-        batch = super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, True, with_answers)
         frac = self.config.get('training_fraction_with_definition', 1.0)
         if frac < 1.0 and not is_eval and self._rng.random() > frac:
-            return batch
+            return super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, is_eval, with_answers)
+        batch = super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, True, with_answers)
 
         lemma_vocab = batch['__lemma_vocab']
         vocab = batch['__vocab']
