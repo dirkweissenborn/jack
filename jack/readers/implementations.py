@@ -5,7 +5,6 @@ from jack.core.shared_resources import SharedResources
 from jack.core.tensorflow import TFReader
 from jack.readers.extractive_qa.shared import XQAOutputModule
 from jack.util.hooks import XQAEvalHook, ClassificationEvalHook
-from projects.assertion_mr.qa.shared import XQAAssertionInputModule, ModularAssertionQAModel
 
 readers = {}
 eval_hooks = {}
@@ -206,7 +205,6 @@ def transe_reader(resources_or_conf: Union[dict, SharedResources] = None):
 
 @extractive_qa_reader
 def modular_assertion_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    """Creates a FastQA model as described in https://arxiv.org/abs/1703.04816 (extractive qa model)."""
     from projects.assertion_mr.qa.shared import XQAAssertionInputModule
     from jack.readers.extractive_qa.shared import XQAOutputModule
     from projects.assertion_mr.qa.shared import ModularAssertionQAModel
@@ -220,17 +218,15 @@ def modular_assertion_qa_reader(resources_or_conf: Union[dict, SharedResources] 
 
 @extractive_qa_reader
 def modular_assertion_definition_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    """Creates a FastQA model as described in https://arxiv.org/abs/1703.04816 (extractive qa model)."""
     from projects.assertion_mr.qa.definition_model import XQAAssertionDefinitionInputModule
     from projects.assertion_mr.qa.definition_model import ModularAssertionDefinitionQAModel
     shared_resources = create_shared_resources(resources_or_conf)
 
-    input_module = XQAAssertionInputModule(shared_resources)
-    model_module = ModularAssertionQAModel(shared_resources)
+    input_module = XQAAssertionDefinitionInputModule(shared_resources)
+    model_module = ModularAssertionDefinitionQAModel(shared_resources)
     output_module = XQAOutputModule()
     reader = TFReader(shared_resources, input_module, model_module, output_module)
-    input_module = XQAAssertionDefinitionInputModule(reader)
-    model_module = ModularAssertionDefinitionQAModel(model_module)
+    input_module.set_reader(reader)
     return TFReader(shared_resources, input_module, model_module, output_module)
 
 

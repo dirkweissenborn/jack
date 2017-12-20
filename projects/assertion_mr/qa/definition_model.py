@@ -1,8 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from jack.core import TensorPortWithDefault, OnlineInputModule, TensorPortTensors, TensorPort
-from jack.core.tensorflow import TFReader
+from jack.core import TensorPortWithDefault, TensorPortTensors, TensorPort
 from jack.readers.extractive_qa.shared import XQAPorts
 from jack.readers.extractive_qa.tensorflow.abstract_model import AbstractXQAModelModule
 from jack.readers.extractive_qa.tensorflow.answer_layer import answer_layer
@@ -24,36 +23,17 @@ class DefinitionPorts:
                                                 "Question idx per definition", "[R]")
 
 
-class XQAAssertionDefinitionInputModule(OnlineInputModule):
-    def __init__(self, reader: TFReader):
+class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
+    def set_reader(self, reader):
         self.reader = reader
-        self._underlying_input_module = reader.input_module
-        assert isinstance(self._underlying_input_module, XQAAssertionInputModule)
-        super(XQAAssertionDefinitionInputModule, self).__init__(reader.shared_resources)
 
     @property
     def output_ports(self):
-        return self._underlying_input_module.output_ports + [
+        return super(XQAAssertionDefinitionInputModule, self).output_ports + [
             DefinitionPorts.definitions, DefinitionPorts.definition_lengths, DefinitionPorts.definition2question]
 
-    @property
-    def training_ports(self):
-        return self._underlying_input_module.training_ports
-
-    def setup(self):
-        self._underlying_input_module.setup()
-
-    def preprocess(self, questions, answers=None, is_eval: bool = False):
-        return self._underlying_input_module.preprocess(questions, answers, is_eval)
-
-    def preprocess_instance(self, question, answers=None):
-        return self._underlying_input_module.preprocess_instance(question, answers)
-
-    def setup_from_data(self, data):
-        self._underlying_input_module.setup_from_data(data)
-
     def create_batch(self, annotations, is_eval, with_answers):
-        batch = self._underlying_input_module.create_batch(annotations, True, with_answers)
+        batch = super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, True, with_answers)
         lemma_vocab = batch['__lemma_vocab']
         vocab = batch['__vocab']
         rev_vocab = batch['__rev_vocab']
@@ -63,11 +43,9 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
         support = batch[AssertionMRPorts.support]
 
         rev_lemma_vocab = {v: k for k, v in lemma_vocab.items()}
-        beam_size = self._underlying_input_module.config['beam_size']
+        beam_size = self.config['beam_size']
         self.reader.model_module.set_beam_size(beam_size)
-        out = self.reader.model_module(batch, self.reader.output_module.input_ports)
-
-        spans = out[XQAPorts.span_prediction]
+        spans = self.reader.model_module(batch, [XQAPorts.span_prediction])[XQAPorts.span_prediction]
 
         definitions = []
         definition_lengths = []
@@ -85,19 +63,18 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
             if answer_lemma in seen_answer_lemmas:
                 continue
             seen_answer_lemmas.add(answer_lemma)
-            ks = self._underlying_input_module._assertion_store.assertion_keys_for_subject(
-                answer_lemma, resource='wikipedia_firstsent')
+            ks = self._assertion_store.assertion_keys_for_subject(answer_lemma, resource='wikipedia_firstsent')
             defns = []
             for key in ks:
-                defns.append(self._underlying_input_module._assertion_store.get_assertion(key))
-            if defns:
-                if len(defns) > 1:
-                    indices_scores = sort_by_tfidf(' '.join(annotations[j].support_tokens[doc_idx]), defns)
-                    # only select definition with best match to the support
-                    defn = defns[indices_scores[0][0]]
-                else:
-                    defn = defns[0]
-                defn = self._underlying_input_module._nlp(defn)
+                defns.append(self._assertion_store.get_assertion(key))
+                if len(defns) > 3:
+                    indices_scores = sort_by_tfidf(
+                        ' '.join(annotations[j].question_tokens + annotations[j].support_tokens[doc_idx]), defns)
+                    # only select the top 3 definition with best match to the support and question
+                    defns = [defns[i] for i, _ in indices_scores[:3]]
+
+            for defn in defns:
+                defn = self._nlp(defn)
                 definition_lengths.append(len(defn))
                 definition2question.append(j)
                 defn_ids = []
@@ -106,7 +83,7 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
                     if w not in vocab:
                         vocab[w] = len(vocab)
                         word_lengths.append(min(len(w), 20))
-                        word_chars.append([self._underlying_input_module.char_vocab.get(c, 0) for c in w[:20]])
+                        word_chars.append([self.char_vocab.get(c, 0) for c in w[:20]])
                         rev_vocab.append(w)
                         if t.lemma_ not in lemma_vocab:
                             lemma_vocab[t.lemma_] = len(lemma_vocab)
@@ -122,9 +99,9 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
         batch[AssertionMRPorts.word2lemma] = word2lemma
         batch[AssertionMRPorts.is_eval] = is_eval
 
-        word_embeddings = np.zeros([len(rev_vocab), self._underlying_input_module.emb_matrix.shape[1]])
+        word_embeddings = np.zeros([len(rev_vocab), self.emb_matrix.shape[1]])
         for i, w in enumerate(rev_vocab):
-            word_embeddings[i] = self._underlying_input_module._get_emb(self._underlying_input_module.vocab(w))
+            word_embeddings[i] = self._get_emb(self.vocab(w))
 
         batch[AssertionMRPorts.word_embeddings] = word_embeddings
 
@@ -134,19 +111,29 @@ class XQAAssertionDefinitionInputModule(OnlineInputModule):
 
 
 class ModularAssertionDefinitionQAModel(AbstractXQAModelModule):
-    def __init__(self, wrapped_model):
-        self._wrapped_model = wrapped_model
-        super(ModularAssertionDefinitionQAModel, self).__init__(wrapped_model.shared_resources,
-                                                                wrapped_model.tf_session)
-
-    def setup(self, is_training=True, reuse=False):
-        self._wrapped_model.setup(is_training, reuse)
-        super().setup(is_training, reuse=True)
+    _input_ports = [AssertionMRPorts.question_length, AssertionMRPorts.support_length,
+                    # char
+                    AssertionMRPorts.word_chars, AssertionMRPorts.word_char_length,
+                    AssertionMRPorts.question, AssertionMRPorts.support,
+                    # optional, only during training
+                    AssertionMRPorts.is_eval,
+                    # for assertions
+                    AssertionMRPorts.word_embeddings,
+                    AssertionMRPorts.assertion_lengths,
+                    AssertionMRPorts.assertion2question,
+                    AssertionMRPorts.assertions,
+                    AssertionMRPorts.word2lemma,
+                    XQAPorts.word_in_question,
+                    XQAPorts.support2question,
+                    XQAPorts.correct_start,
+                    XQAPorts.answer2support_training,
+                    DefinitionPorts.definitions,
+                    DefinitionPorts.definition_lengths,
+                    DefinitionPorts.definition2question]
 
     @property
     def input_ports(self):
-        return self._wrapped_model.input_ports + [
-            DefinitionPorts.definitions, DefinitionPorts.definition_lengths, DefinitionPorts.definition2question]
+        return self._input_ports
 
     def set_beam_size(self, k):
         self._beam_size_assign(k)
@@ -180,27 +167,32 @@ class ModularAssertionDefinitionQAModel(AbstractXQAModelModule):
         word_embeddings.set_shape([None, input_size])
 
         if shared_resources.config.get('no_reading', False):
-            word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu,
-                                              name="embeddings_projection")
-            new_word_embeddings = word_with_char_embed(
-                size, word_embeddings, tensors.word_chars, tensors.word_char_length,
-                len(shared_resources.char_vocab), tensors.is_eval,
-                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0))
+            new_word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu,
+                                                  name="embeddings_projection")
+            if with_char_embeddings:
+                new_word_embeddings = word_with_char_embed(
+                    size, new_word_embeddings, tensors.word_chars, tensors.word_char_length,
+                    len(shared_resources.char_vocab))
+            keep_prob = 1.0 - shared_resources.config.get('dropout', 0.0)
+            if keep_prob < 1.0:
+                new_word_embeddings = tf.cond(is_eval,
+                                              lambda: new_word_embeddings,
+                                              lambda: tf.nn.dropout(new_word_embeddings, keep_prob, [1, size]))
             reading_sequence_offset = [support, question, assertions]
         else:
             if shared_resources.config.get("assertion_limit", 0) > 0:
                 reading_sequence = [support, question, assertions, definitions]
                 reading_sequence_lengths = [support_length, question_length, assertion_lengths, definition_lengths]
-                reading_sequence_2_batch = [support2question, None, assertion2question, definition2question]
+                reading_sequence_to_batch = [support2question, None, assertion2question, definition2question]
             else:
                 reading_sequence = [support, question, definitions]
                 reading_sequence_lengths = [support_length, question_length, definition_lengths]
-                reading_sequence_2_batch = [support2question, None, definition2question]
+                reading_sequence_to_batch = [support2question, None, definition2question]
 
             reading_encoder_config = shared_resources.config['reading_module']
             new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
                 size, word_embeddings, reading_encoder_config,
-                reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
+                reading_sequence, reading_sequence_to_batch, reading_sequence_lengths,
                 word2lemma, word_chars, word_char_length, is_eval,
                 keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
                 with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))

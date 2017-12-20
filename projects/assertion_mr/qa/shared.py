@@ -367,27 +367,32 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
         word_embeddings.set_shape([None, input_size])
 
         if shared_resources.config.get('no_reading', False):
-            word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu,
-                                              name="embeddings_projection")
-            new_word_embeddings = word_with_char_embed(
-                size, word_embeddings, tensors.word_chars, tensors.word_char_length,
-                len(shared_resources.char_vocab), tensors.is_eval,
-                keep_prob=1.0 - shared_resources.config.get('dropout', 0.0))
+            new_word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu,
+                                                  name="embeddings_projection")
+            if with_char_embeddings:
+                new_word_embeddings = word_with_char_embed(
+                    size, new_word_embeddings, tensors.word_chars, tensors.word_char_length,
+                    len(shared_resources.char_vocab))
+            keep_prob = 1.0 - shared_resources.config.get('dropout', 0.0)
+            if keep_prob < 1.0:
+                new_word_embeddings = tf.cond(is_eval,
+                                              lambda: new_word_embeddings,
+                                              lambda: tf.nn.dropout(new_word_embeddings, keep_prob, [1, size]))
             reading_sequence_offset = [support, question, assertions]
         else:
             if shared_resources.config.get("assertion_limit", 0) > 0:
                 reading_sequence = [support, question, assertions]
                 reading_sequence_lengths = [support_length, question_length, assertion_lengths]
-                reading_sequence_2_batch = [support2question, None, assertion2question]
+                reading_sequence_to_batch = [support2question, None, assertion2question]
             else:
                 reading_sequence = [support, question]
                 reading_sequence_lengths = [support_length, question_length]
-                reading_sequence_2_batch = [support2question, None]
+                reading_sequence_to_batch = [support2question, None]
 
             reading_encoder_config = shared_resources.config['reading_module']
             new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
                 size, word_embeddings, reading_encoder_config,
-                reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
+                reading_sequence, reading_sequence_to_batch, reading_sequence_lengths,
                 word2lemma, word_chars, word_char_length, is_eval,
                 keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
                 with_char_embeddings=with_char_embeddings, num_chars=len(shared_resources.char_vocab))

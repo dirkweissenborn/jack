@@ -19,7 +19,11 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
         word_embeddings = tf.layers.dense(word_embeddings, size, activation=tf.nn.relu, name="embeddings_projection")
         if with_char_embeddings:
             word_embeddings = word_with_char_embed(
-                size, word_embeddings, unique_word_chars, unique_word_char_length, num_chars, is_eval, keep_prob)
+                size, word_embeddings, unique_word_chars, unique_word_char_length, num_chars)
+        if keep_prob < 1.0:
+            word_embeddings = tf.cond(is_eval,
+                                      lambda: word_embeddings,
+                                      lambda: tf.nn.dropout(word_embeddings, keep_prob, [1, size]))
         # tile word_embeddings by batch size (individual batches update embeddings individually)
         ctxt_word_embeddings = tf.tile(word_embeddings, tf.stack([batch_size, 1]))
         # HACK so that backprop works with indexed slices that come through here which are not handled by tile
@@ -77,8 +81,7 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
     return ctxt_word_embeddings, reading_sequence_offset, offsets
 
 
-def word_with_char_embed(size, word_embeddings, unique_word_chars, unique_word_char_length, num_chars, is_eval,
-                         keep_prob):
+def word_with_char_embed(size, word_embeddings, unique_word_chars, unique_word_char_length, num_chars):
     # compute combined embeddings
     char_word_embeddings = conv_char_embedding(
         num_chars, size, unique_word_chars, unique_word_char_length)
@@ -86,10 +89,6 @@ def word_with_char_embed(size, word_embeddings, unique_word_chars, unique_word_c
     gate = tf.layers.dense(tf.concat([word_embeddings, char_word_embeddings], 1), size, tf.nn.sigmoid,
                            bias_initializer=tf.constant_initializer(1.0), name="embeddings_gating")
     word_embeddings = word_embeddings * gate + (1.0 - gate) * char_word_embeddings
-    if keep_prob < 1.0:
-        word_embeddings = tf.cond(is_eval,
-                                  lambda: word_embeddings,
-                                  lambda: tf.nn.dropout(word_embeddings, keep_prob))
 
     return word_embeddings
 
