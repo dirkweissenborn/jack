@@ -12,12 +12,14 @@ def uncamel(name):
     return re.sub('([a-z0-9])([A-Z])', r'\1 \2', s1).lower()
 
 
-def extract_assertions(abstracts, labels, store):
+def write_assertions(abstracts, labels, store):
     # nlp = spacy.load('en', disable=['parser', 'ner', 'textcat'])
     nlp = spacy.load('en', parser=False)
 
     lemma_labels = dict()
     counter = 0
+    reg = r'( )?\([^)]+\)'
+
     for article, abstract in abstracts.items():
         abstract = abstract[0]
         if counter % 100000 == 0:
@@ -28,7 +30,10 @@ def extract_assertions(abstracts, labels, store):
         else:
             assertion = abstract
         subjects = []
-        for l in labels.get(article, [uncamel(article).replace('_', ' ')]):
+        ll = labels.get(article)
+        if ll is None:
+            ll = [re.sub(reg, '', uncamel(article).replace('_', ' '))]
+        for l in ll:
             if l not in lemma_labels:
                 lemma_labels[l] = ' '.join(t.lemma_ for t in nlp(l))
             subjects.append(lemma_labels[l])
@@ -49,32 +54,14 @@ if __name__ == '__main__':
     tf.app.flags.DEFINE_string('dbpedia_labels', None, 'path to dbpedia labels')
     tf.app.flags.DEFINE_string('dbpedia_disambiguates', None, 'path to dbpedia disambiguations')
     tf.app.flags.DEFINE_string('dbpedia_transitive_redirect', None, 'path to dbpedia transitive redirects')
-    tf.app.flags.DEFINE_string('dbpedia_transitive_types', None, 'path to dbpedia instance transitive types')
     tf.app.flags.DEFINE_string('assertion_store_path', None, 'directory to assertion store')
 
     FLAGS = tf.app.flags.FLAGS
-    store = AssertionStore(FLAGS.assertion_store_path, True)
-
-    logger.info('Loading DBpedia types')
-    allowed = set()
-    with BZ2File(FLAGS.dbpedia_transitive_types) as f:
-        for l in f:
-            l = l.decode('utf-8')
-            if l.startswith('#'):
-                continue
-            split = l.split('> ')
-            subj = split[0][split[0].rindex('/') + 1:]
-            if subj.startswith('List_of') or '__' in subj or subj in allowed:
-                continue
-            obj = split[2]
-            obj = obj[obj.rindex('/') + 1:]
-            if obj != 'owl#Thing':  # we only consider entities that have some other type than only owl#Thing
-                allowed.add(subj)
-    logger.info('Number of allowed entities: %d' % len(allowed))
+    store = AssertionStore(FLAGS.assertion_store_path, writeback=True)
 
 
-    def simple_parse(fn, allowed_subj=None, allowed_obj=None):
-        d = defaultdict(list)
+    def simple_parse(fn):
+        d = defaultdict(set)
         with BZ2File(fn) as f:
             for l in f:
                 l = l.decode('utf-8')
@@ -82,7 +69,7 @@ if __name__ == '__main__':
                     continue
                 split = l.split('> ')
                 subj = split[0][split[0].rindex('/') + 1:]
-                if allowed_subj is not None and subj not in allowed_subj:
+                if subj.startswith('List_of') or '__' in subj:
                     continue
                 obj = split[2]
                 if obj.startswith('"'):
@@ -90,40 +77,29 @@ if __name__ == '__main__':
                     obj = obj[:obj.find('"@en')]
                 else:
                     obj = obj[obj.rindex('/') + 1:]
-                if allowed_obj is not None and obj not in allowed_obj:
-                    continue
-                d[subj].append(obj)
+                d[subj].add(obj)
         return d
 
-    logger.info('Loading DBpedia labels')
+
+    logger.info('Loading DBpedia labels...')
     labels = simple_parse(FLAGS.dbpedia_labels)
 
-    # reg = r'( )?\([^)]+\)'
-    # for k, vs in labels.items():
-    #    for v in vs:
-    #        if '(' in v:
-    #            labels[k].append(re.sub(reg, '', v))
+    logger.info('Loading DBpedia disambiguations...')
+    disambiguations = simple_parse(FLAGS.dbpedia_disambiguates)
+    logger.info('Loading DBpedia redirects...')
+    transitive_redirects = simple_parse(FLAGS.dbpedia_transitive_redirect)
 
-    logger.info('Loading DBpedia abstracts')
-    abstracts = simple_parse(FLAGS.dbpedia_short_abstracts, allowed_subj=allowed)
-    logger.info('Loading DBpedia disambiguations')
-    disambiguations = simple_parse(FLAGS.dbpedia_disambiguates, allowed_obj=allowed)
-    logger.info('Loading DBpedia redirects')
-    transitive_redirects = simple_parse(FLAGS.dbpedia_transitive_redirect, allowed_obj=allowed)
-
-    logger.info('Extending DBpedia labels with redirects and disambiguations')
-    labels_ext = dict()
-    labels_ext.update((k, set(vs)) for k, vs in labels.items() if k in allowed)
+    logger.info('Extending DBpedia labels with redirects and disambiguations...')
     for k, vs in transitive_redirects.items():
         for v in vs:
-            if v in labels_ext:
-                labels_ext[v].add(labels.get(k, [uncamel(k).replace('_', ' ')])[0])
+            labels[v].update(labels.get(k, [uncamel(k).replace('_', ' ')]))
     for k, vs in disambiguations.items():
-        k = k.replace('_(disambiguation)', '')
         for v in vs:
-            if v in labels_ext:
-                labels_ext[v].add(labels.get(k, [uncamel(k).replace('_', ' ')])[0])
+            labels[v].update(labels.get(k, [uncamel(k.replace('_(disambiguation)', '')).replace('_', ' ')]))
 
-    logger.info('Writing first wikipedia sentences as assertions...')
-    extract_assertions(abstracts, labels_ext, store)
+    logger.info('Loading DBpedia abstracts...')
+    abstracts = simple_parse(FLAGS.dbpedia_short_abstracts)
+
+    logger.info('Writing first wikipedia sentences for %d entities...' % len(abstracts))
+    write_assertions(abstracts, labels, store)
     store.save()
