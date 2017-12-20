@@ -397,7 +397,7 @@ class XQAEvalHook(EvalHook):
             f1 += metric_max_over_ground_truths(f1_score, pa[0].text, ground_truth)
             exact_match += metric_max_over_ground_truths(exact_match_score, pa[0].text, ground_truth)
 
-        return {"f1": f1, "exact": exact_match, "loss": loss}
+        return {"f1": f1, "exact": exact_match, "loss": loss * len(inputs)}
 
 
 class ClassificationEvalHook(EvalHook):
