@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import tensorflow as tf
 
@@ -24,6 +26,10 @@ class DefinitionPorts:
 
 
 class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
+    def setup(self):
+        super().setup()
+        self._rng = random.Random(1)
+
     def set_reader(self, reader):
         self.reader = reader
 
@@ -34,6 +40,10 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
 
     def create_batch(self, annotations, is_eval, with_answers):
         batch = super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, True, with_answers)
+        frac = self.config.get('training_fraction_with_definition', 1.0)
+        if frac < 1.0 and not is_eval and self._rng.random() > frac:
+            return batch
+
         lemma_vocab = batch['__lemma_vocab']
         vocab = batch['__vocab']
         rev_vocab = batch['__rev_vocab']

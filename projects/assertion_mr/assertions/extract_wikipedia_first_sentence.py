@@ -20,25 +20,25 @@ def write_assertions(abstracts, labels, store):
     counter = 0
     reg = r'( )?\([^)]+\)'
 
-    for article, abstract in abstracts.items():
-        abstract = abstract[0]
-        if counter % 100000 == 0:
-            logger.info('%d assertions added' % counter)
-        sentence_end = abstract.find('. ')
-        if sentence_end > 0:
-            assertion = abstract[:sentence_end]
-        else:
-            assertion = abstract
-        subjects = []
-        ll = labels.get(article)
-        if ll is None:
-            ll = [re.sub(reg, '', uncamel(article).replace('_', ' '))]
-        for l in ll:
-            if l not in lemma_labels:
-                lemma_labels[l] = ' '.join(t.lemma_ for t in nlp(l))
-            subjects.append(lemma_labels[l])
-        store.add_assertion(assertion, subjects, [], 'wikipedia_firstsent')
-        counter += 1
+    for article, abstracts in abstracts.items():
+        for abstract in abstracts:
+            if counter % 100000 == 0:
+                logger.info('%d assertions added' % counter)
+            sentence_end = abstract.find('. ')
+            if sentence_end > 0:
+                assertion = abstract[:sentence_end]
+            else:
+                assertion = abstract
+            subjects = []
+            ll = labels.get(article)
+            if ll is None:
+                ll = [re.sub(reg, '', uncamel(article).replace('_', ' '))]
+            for l in ll:
+                if l not in lemma_labels:
+                    lemma_labels[l] = ' '.join(t.lemma_ for t in nlp(l))
+                subjects.append(lemma_labels[l])
+            store.add_assertion(assertion, subjects, [], 'wikipedia_firstsent')
+            counter += 1
 
 
 if __name__ == '__main__':

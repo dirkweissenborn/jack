@@ -373,13 +373,13 @@ class XQAEvalHook(EvalHook):
         self._target_answer_span_port = target_answer_span_port
         self._answer2support_port = answer2support_port
         self._support2question_port = support2question_port
-        ports = reader.output_module.input_ports
+        ports = [Ports.loss] + reader.output_module.input_ports
         super().__init__(reader, dataset, batch_size, ports, iter_interval, epoch_interval, metrics, summary_writer,
                          write_metrics_to, info, side_effect)
 
     @property
     def possible_metrics(self) -> List[str]:
-        return ["exact", "f1"]
+        return ['exact', 'f1', 'loss']
 
     @staticmethod
     def preferred_metric_and_initial_score():
@@ -389,6 +389,7 @@ class XQAEvalHook(EvalHook):
             -> Mapping[str, float]:
         qs = [q for q, a in inputs]
         p_answers = self.reader.output_module(qs, *(tensors[p] for p in self.reader.output_module.input_ports))
+        loss = tensors[Ports.loss]
 
         f1 = exact_match = 0
         for pa, (q, ass) in zip(p_answers, inputs):
@@ -396,7 +397,7 @@ class XQAEvalHook(EvalHook):
             f1 += metric_max_over_ground_truths(f1_score, pa[0].text, ground_truth)
             exact_match += metric_max_over_ground_truths(exact_match_score, pa[0].text, ground_truth)
 
-        return {"f1": f1, "exact": exact_match}
+        return {"f1": f1, "exact": exact_match, "loss": loss}
 
 
 class ClassificationEvalHook(EvalHook):
