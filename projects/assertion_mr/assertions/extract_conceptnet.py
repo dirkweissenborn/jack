@@ -1,3 +1,4 @@
+import gzip
 import re
 
 import spacy
@@ -35,11 +36,8 @@ def normalize_and_sois(s):
 
 
 def is_valid(l):
-    if "/d/verbosity" in l:
-        return False
-    if "/d/conceptnet/4/en" in l and not l.count("/s/contributor/omcs/") > 1:
-        return False
-    return True
+    return "/c/en/" in l and "/d/verbosity" not in l and (
+        "/d/conceptnet/4/en" not in l or l.count("/s/contributor/omcs/") > 1)
 
 
 def lemmatized(tokens, start, end):
@@ -51,12 +49,12 @@ def extract_assertions(conceptnet_path, assertion_store):
     nlp = spacy.load('en', parser=False, entity=False, matcher=False)
     rel2sf = dict()
     counter = 0
-    with open(conceptnet_path) as f:
+    with gzip.GzipFile(conceptnet_path) as f:
         for l in f:
-            if counter % 100000 == 0:
-                logger.info('%d assertions added' % counter)
             if not is_valid(l):
                 continue
+            if counter % 100000 == 0:
+                logger.info('%d assertions added' % counter)
             try:
                 split = l.strip().split("\t")
                 [rel, subj, obj] = split[1:4]
@@ -105,10 +103,10 @@ if __name__ == '__main__':
     logger = logging.getLogger(os.path.basename(sys.argv[0]))
     logging.basicConfig(level=logging.INFO)
 
-    tf.app.flags.DEFINE_string('conceptnet_csv', None, 'path to conceptnet csv file')
+    tf.app.flags.DEFINE_string('conceptnet_gz', None, 'path to conceptnet csv file')
     tf.app.flags.DEFINE_string('assertion_store_path', None, 'directory to assertion store')
 
     FLAGS = tf.app.flags.FLAGS
     store = AssertionStore(FLAGS.assertion_store_path, True)
-    extract_assertions(FLAGS.conceptnet_csv, store)
+    extract_assertions(FLAGS.conceptnet_gz, store)
     store.save()
