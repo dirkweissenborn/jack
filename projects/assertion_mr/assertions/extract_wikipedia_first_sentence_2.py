@@ -11,6 +11,7 @@ from projects.assertion_mr.assertions.store import AssertionStore
 def uncamel(name):
     return re.sub('([a-z0-9])([A-Z])', r'\1 \2', name)
 
+
 def write_assertions(abstracts, labels, store):
     # nlp = spacy.load('en', disable=['parser', 'ner', 'textcat'])
     nlp = spacy.load('en', parser=False)
@@ -39,6 +40,7 @@ def write_assertions(abstracts, labels, store):
             store.add_assertion(assertion, subjects, [], 'wikipedia_firstsent')
             counter += 1
 
+
 if __name__ == '__main__':
     import logging
     import os
@@ -54,6 +56,8 @@ if __name__ == '__main__':
     tf.app.flags.DEFINE_string('assertion_store_path', None, 'directory to assertion store')
 
     FLAGS = tf.app.flags.FLAGS
+
+
     def simple_parse(fn):
         d = defaultdict(set)
         with BZ2File(fn) as f:

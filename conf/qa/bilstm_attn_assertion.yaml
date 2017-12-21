@@ -33,6 +33,7 @@ model:
   - input: 'support'
     output: 'support_conv'
     module: 'conv_glu'
+    name: 'context_encoder'
     conv_width: 5
     num_layers: 1
 
@@ -48,6 +49,7 @@ model:
   - input: 'question'
     output: 'question_conv'
     module: 'conv_glu'
+    name: 'context_encoder'
     conv_width: 5
     num_layers: 1
 
@@ -64,17 +66,15 @@ model:
 
   - input: 'support'
     module: 'lstm'
-    name: 'encoder'
     activation: 'tanh'
     with_projection: True
     dropout: *dropout
 
   - input: 'question'
     module: 'lstm'
-    name: 'encoder'
     with_projection: True
     activation: 'tanh'
     dropout: *dropout
 
   answer_layer:
-    module: 'mlp'
+    module: 'bilinear'

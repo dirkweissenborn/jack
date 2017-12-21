@@ -30,6 +30,7 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
 
     def setup(self):
         super().setup()
+        self.use_definitions = True
         self._rng = random.Random(1)
 
     def set_reader(self, reader):
@@ -42,7 +43,7 @@ class XQAAssertionDefinitionInputModule(XQAAssertionInputModule):
 
     def create_batch(self, annotations, is_eval, with_answers):
         frac = self.config.get('training_fraction_with_definition', 1.0)
-        if frac < 1.0 and not is_eval and self._rng.random() > frac:
+        if not self.use_definitions and frac < 1.0 and not is_eval and self._rng.random() > frac:
             return super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, is_eval, with_answers)
         batch = super(XQAAssertionDefinitionInputModule, self).create_batch(annotations, True, with_answers)
 
