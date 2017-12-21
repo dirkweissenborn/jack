@@ -35,8 +35,9 @@ def normalize_and_sois(s):
     return s_norm, sois
 
 
+__reg = r'^[^\t]+/en/([^\t])+/en/'  # only get connections between english concepts
 def is_valid(l):
-    return "/c/en/" in l and "/d/verbosity" not in l and (
+    return re.match(__reg, l) is not None and "/d/verbosity" not in l and (
         "/d/conceptnet/4/en" not in l or l.count("/s/contributor/omcs/") > 1)
 
 
