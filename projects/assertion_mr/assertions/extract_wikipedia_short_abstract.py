@@ -1,7 +1,6 @@
 import re
 from bz2 import BZ2File
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor
 
 import spacy
 
@@ -12,9 +11,9 @@ def uncamel(name):
     return re.sub('([a-z0-9])([A-Z])', r'\1 \2', name)
 
 
-def write_assertions(abstracts, labels, store, max_tokens=50):
+def write_assertions(abstracts, labels, store):
     # nlp = spacy.load('en', disable=['parser', 'ner', 'textcat'])
-    nlp = spacy.load('en', parser=False)
+    nlp = spacy.load('en', parser=False, entity=False)
 
     lemma_labels = dict()
     counter = 0
@@ -34,6 +33,7 @@ def write_assertions(abstracts, labels, store, max_tokens=50):
             subjects.add(lemma_labels[l])
         store.add_assertion(assertion, subjects, [], 'wikipedia_firstsent')
         counter += 1
+
 
 if __name__ == '__main__':
     import logging
@@ -55,13 +55,13 @@ if __name__ == '__main__':
 
     FLAGS = tf.app.flags.FLAGS
 
-    pool = ProcessPoolExecutor(4)
-
 
     def myopen(fn):
         return BZ2File(fn) if fn.endswith('.bz2') else open(fn)
 
 
+    prefix = "http://dbpedia.org/resource/"
+    prefix_len = len(prefix)
     logger.info('Loading DBpedia abstracts...')
 
 
@@ -70,7 +70,7 @@ if __name__ == '__main__':
         if l.startswith('#'):
             return None, None
         split = l.split('> ')
-        article = split[0][split[0].rindex('/') + 1:]
+        article = split[0][prefix_len + 1:]
         if article.startswith('List_of') or '(disambiguation)' in article or '__' in article:
             return None, None
         abstract = split[2]
@@ -81,13 +81,13 @@ if __name__ == '__main__':
 
     abstracts = dict()
     with myopen(FLAGS.dbpedia_short_abstracts) as f:
-        for article, abstract in pool.map(process_abstract, f, chunksize=100000):
+        ct = 0
+        for article, abstract in map(process_abstract, f):
             if article is not None:
                 abstracts[article] = abstract
-    pool.shutdown()
-    del pool
-
-    anchor2articles = defaultdict(lambda: defaultdict(int))
+            ct += 1
+            if ct % 1000000 == 0:
+                logger.info('%d lines processed...' % ct)
 
 
     def process_line(l):
@@ -95,14 +95,14 @@ if __name__ == '__main__':
         if l.startswith('#'):
             return None, None
         split = l.split('> ')
-        subj = split[0][split[0].rindex('/') + 1:]
+        subj = split[0][prefix_len + 1:]
         if subj.startswith('List_of') or '(disambiguation)' in subj or '__' in subj:
             return None, None
         obj = split[2]
         if obj.startswith('"'):
             obj = obj[1:obj.find('"@en')]
         else:
-            obj = obj[obj.rindex('/') + 1:]
+            obj = obj[prefix_len + 1:]
         return subj, obj
 
 
@@ -118,14 +118,14 @@ if __name__ == '__main__':
                 logger.info('%d lines processed...' % ct)
 
     logger.info('Loading DBpedia anchor texts for articles...')
-
+    anchor2articles = defaultdict(lambda: defaultdict(int))
     with myopen(FLAGS.dbpedia_anchor_texts) as f:
         ct = 0
         for article, anchor_text in map(process_line, f):
             if article is not None:
                 anchor2articles[anchor_text.lower()][transitive_redirects.get(article, article)] += 1
             ct += 1
-            if ct % 1000000 == 0:
+            if ct % 10000000 == 0:
                 logger.info('%d lines processed...' % ct)
 
     logger.info('Selecting Top-%d articles for anchors that were at least %d times linked...' %
@@ -144,7 +144,7 @@ if __name__ == '__main__':
             labels[v].add(uncamel(k).replace('_', ' ').lower())
     del transitive_redirects
 
-    logger.info('Writing first wikipedia sentences for %d entities...' % len(abstracts))
+    logger.info('Writing shortened wikipedia abstracts for %d entities...' % len(abstracts))
     store = AssertionStore(FLAGS.assertion_store_path, writeback=True)
     write_assertions(abstracts, labels, store)
     del abstracts
