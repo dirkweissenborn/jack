@@ -22,7 +22,8 @@ def write_assertions(abstracts, labels, store, max_tokens=50):
     for article, assertion in abstracts.items():
         if counter % 100000 == 0:
             logger.info('%d assertions added' % counter)
-            store._assertion_db['wikipedia_firstsent'].sync()
+            if counter > 0:
+                store._assertion_db['wikipedia_firstsent'].sync()
         subjects = set()
         ll = labels.get(article)
         if ll is None or not ll:
