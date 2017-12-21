@@ -51,6 +51,7 @@ def extract_assertions(conceptnet_path, assertion_store):
     counter = 0
     with gzip.GzipFile(conceptnet_path) as f:
         for l in f:
+            l = l.decode('utf-8')
             if not is_valid(l):
                 continue
             if counter % 100000 == 0:
