@@ -139,9 +139,8 @@ if __name__ == '__main__':
     del anchor2articles
 
     logger.info('Extending DBpedia labels with redirects...')
-    for k, vs in transitive_redirects.items():
-        for v in vs:
-            labels[v].add(uncamel(k).replace('_', ' ').lower())
+    for k, v in transitive_redirects.items():
+        labels[v].add(uncamel(k).replace('_', ' ').lower())
     del transitive_redirects
 
     logger.info('Writing shortened wikipedia abstracts for %d entities...' % len(abstracts))
