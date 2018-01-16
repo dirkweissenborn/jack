@@ -1,7 +1,7 @@
 parent_config: ['./conf/qa/bilstm_attn_assertion.yaml', './conf/qa/squad/abstract_squad.yaml']
 seed: 1337
 
-repr_dim: 300
+repr_dim: 150
 dropout: 0.2
 
 name: 'bilstm_attn_assertion_definition_reader'
