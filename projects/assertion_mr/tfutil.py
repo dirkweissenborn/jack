@@ -59,7 +59,8 @@ def embedding_refinement(size, word_embeddings, sequence_module, reading_sequenc
                 mode_feature = tf.tile(mode_feature, tf.stack([num_seq, max_length, 1]))
                 encoded = tf.concat([encoded, mode_feature], 2)
                 encoded = modular_encoder.modular_encoder(
-                    sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size, is_eval)[0]['text']
+                    sequence_module, {'text': encoded}, {'text': length}, {'text': None}, size,
+                    1.0 - keep_prob, is_eval)[0]['text']
 
                 mask = misc.mask_for_lengths(length, max_length, mask_right=False, value=1.0)
                 encoded = encoded * tf.expand_dims(mask, 2)
