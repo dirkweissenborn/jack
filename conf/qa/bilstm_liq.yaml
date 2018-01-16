@@ -1,8 +1,6 @@
 description: >
   BiLSTM with assertions.
 
-parent_config: './conf/qa/abstract_qa.yaml'
-
 name: 'bilstm_liq_reader'
 reader: 'modular_assertion_qa_reader'
 
