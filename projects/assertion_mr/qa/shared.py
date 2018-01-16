@@ -361,6 +361,7 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
         model = shared_resources.config['model']
         repr_dim = shared_resources.config['repr_dim']
         input_size = shared_resources.config["repr_dim_input"]
+        dropout = shared_resources.config.get("dropout", 0.0)
         size = shared_resources.config["repr_dim"]
         with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
 
@@ -373,7 +374,7 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                 new_word_embeddings = word_with_char_embed(
                     size, new_word_embeddings, tensors.word_chars, tensors.word_char_length,
                     len(shared_resources.char_vocab))
-            keep_prob = 1.0 - shared_resources.config.get('dropout', 0.0)
+            keep_prob = 1.0 - dropout
             if keep_prob < 1.0:
                 new_word_embeddings = tf.cond(is_eval,
                                               lambda: new_word_embeddings,
@@ -411,7 +412,8 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
 
         encoder_config = model['encoder_layer']
 
-        encoded, _, _ = modular_encoder(encoder_config, inputs, inputs_length, inputs_mapping, repr_dim, is_eval)
+        encoded, lengths, mappings = modular_encoder(
+            encoder_config, inputs, inputs_length, inputs_mapping, repr_dim, dropout, tensors.is_eval)
 
         with tf.variable_scope('answer_layer'):
             answer_layer_config = model['answer_layer']
@@ -422,7 +424,6 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
                 answer_layer_config['repr_dim'] = repr_dim
             if 'max_span_size' not in answer_layer_config:
                 answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
-
             beam_size = tf.get_variable(
                 'beam_size', initializer=shared_resources.config.get('beam_size', 1), dtype=tf.int32, trainable=False)
             beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
@@ -430,9 +431,10 @@ class ModularAssertionQAModel(AbstractXQAModelModule):
             self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
 
             start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
-                answer_layer(encoded_question, tensors.question_length, encoded_support,
-                             tensors.support_length,
-                             tensors.support2question, tensors.answer2support, tensors.is_eval,
+                answer_layer(encoded_question, lengths[answer_layer_config.get('question', 'question')],
+                             encoded_support, lengths[answer_layer_config.get('support', 'support')],
+                             mappings[answer_layer_config.get('support', 'support')],
+                             tensors.answer2support, tensors.is_eval,
                              tensors.correct_start, beam_size=beam_size, **answer_layer_config)
 
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)

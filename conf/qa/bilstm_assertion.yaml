@@ -20,7 +20,7 @@ reading_module:
   with_projection: True
   activation: 'relu'
 
-dropout: &dropout 0.2
+dropout: 0.2
 repr_dim: 150
 max_span_size: 16
 
@@ -34,14 +34,14 @@ model:
     name: 'encoder'
     activation: 'tanh'
     with_projection: True
-    dropout: *dropout
+    dropout: True
 
   - input: 'question'
     module: 'lstm'
     name: 'encoder'
     with_projection: True
     activation: 'tanh'
-    dropout: *dropout
+    dropout: True
 
   answer_layer:
     module: 'mlp'

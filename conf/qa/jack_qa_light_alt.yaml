@@ -25,14 +25,14 @@ model:
     conv_width: 5
     num_layers: 2
     name: 'contextual_encoding'
-    dropout: *dropout
+    dropout: True
   - input: 'question'
     output: 'enc_question'
     module: 'conv_glu'
     conv_width: 5
     num_layers: 2
     name: 'contextual_encoding'  # use same network as support
-    dropout: *dropout
+    dropout: True
 
   - input: ['enc_question', 'question']
     output: 'enc_question'
@@ -56,8 +56,8 @@ model:
     with_projection: True
     name: 'encoder'
     activation: 'tanh'
-    dropout: *dropout
-       
+    dropout: True
+
   # Attention
   - input: 'enc_question'
     dependent: 'enc_support'
@@ -66,14 +66,14 @@ model:
     attn_type: 'diagonal_bilinear'
     with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
     scaled: True
-   
+
   # BiLSTM Question
   - input: 'question'
     module: 'lstm'  # the only application of a RNN
     with_projection: True
     name: 'encoder'
     activation: 'tanh'
-    dropout: *dropout
+    dropout: True
 
   answer_layer:
     support: 'support'

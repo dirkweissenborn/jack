@@ -27,7 +27,7 @@ model:
     name: 'encoder'
     activation: 'tanh'
     with_projection: True
-    dropout: *dropout
+    dropout: True
 
   - input: ['question', 'question_ones', 'question_ones']
     output: 'question'
@@ -38,7 +38,7 @@ model:
     name: 'encoder'
     with_projection: True
     activation: 'tanh'
-    dropout: *dropout
+    dropout: True
 
   answer_layer:
     module: 'mlp'

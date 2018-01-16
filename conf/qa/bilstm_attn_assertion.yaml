@@ -68,13 +68,13 @@ model:
     module: 'lstm'
     activation: 'tanh'
     with_projection: True
-    dropout: *dropout
+    dropout: True
 
   - input: 'question'
     module: 'lstm'
     with_projection: True
     activation: 'tanh'
-    dropout: *dropout
+    dropout: True
 
   answer_layer:
     module: 'bilinear'
