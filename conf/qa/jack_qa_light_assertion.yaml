@@ -6,7 +6,7 @@ parent_config: './conf/qa/abstract_qa.yaml'
 name: 'jack_qa_light_assertion_reader'
 reader: 'modular_assertion_qa_reader'
 
-assertion_dir: '/data/assertion_shelve'
+assertion_dir: '/data/assertion_store'
 assertion_limit: 50
 assertion_sources: ['conceptnet']
 
@@ -19,44 +19,32 @@ reading_module:
 
 dropout: &dropout 0.2
 
+repr_dim: 150
+max_span_size: 16
+
 # To be fast we have to restrict the use of RNNs as much as possible and use convolutions instead
 model:
   encoder_layer:
-
-  - input: 'support'
-    output: 'emb_support'
-    name: 'embedding_projection'
-    module: 'dense'
-    activation: 'tanh'
-    dropout: *dropout
-  # Question
-  - input: 'question'
-    output: 'emb_question'
-    name: 'embedding_projection'  # use same network as support
-    module: 'dense'
-    activation: 'tanh'
-    dropout: *dropout
-
   # Shared Contextual Encoding
-  - input: 'emb_support'
-    output: 'support'
+  - input: 'support'
+    output: 'enc_support'
     module: 'conv_glu'
     conv_width: 5
     num_layers: 2
     name: 'contextual_encoding'
     dropout: *dropout
-  - input: 'emb_question'
-    output: 'question'
+  - input: 'question'
+    output: 'enc_question'
     module: 'conv_glu'
     conv_width: 5
     num_layers: 2
     name: 'contextual_encoding'  # use same network as support
     dropout: *dropout
 
-  - input: ['emb_question', 'question']
+  - input: ['enc_question', 'question']
     output: 'enc_question'
     module: 'concat'
-  - input: ['emb_support', 'support']
+  - input: ['enc_support', 'support']
     output: 'enc_support'
     module: 'concat'
 
@@ -68,41 +56,33 @@ model:
     attn_type: 'diagonal_bilinear'
     with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
     scaled: True
-  - input: 'support'
-    output: 'support_self'
-    module: 'dense'
-    activation: 'tanh'
-
-  # Self Attention
-  - input: 'support_self'
-    module: 'self_attn'
-    attn_type: 'diagonal_bilinear'
-    scaled: True
-    with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
-    num_attn_heads: 1
-  - input: ['support', 'support_self']
-    output: 'support'
-    module: 'concat'
-  - input: 'support'
-    module: 'dense'
-    activation: 'relu'
-    dropout: *dropout
 
   # BiLSTM
   - input: 'support'
     module: 'lstm'  # the only application of a RNN
     with_projection: True
+    name: 'encoder'
     activation: 'tanh'
     dropout: *dropout
 
-  - input: 'support'
-    module: 'conv_glu'
-    conv_width: 5
-    num_layers: 1
-    residual: True
+  # Attention
+  - input: 'enc_question'
+    dependent: 'enc_support'
+    output: 'question'
+    module: 'attention_matching'
+    attn_type: 'diagonal_bilinear'
+    with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
+    scaled: True
+
+  # BiLSTM Question
+  - input: 'question'
+    module: 'lstm'  # the only application of a RNN
+    with_projection: True
+    name: 'encoder'
+    activation: 'tanh'
+    dropout: *dropout
 
   answer_layer:
     support: 'support'
-    question: 'enc_question'
-    module: 'bilinear'
-    max_span_size: 16
+    question: 'question'
+    module: 'mlp'
