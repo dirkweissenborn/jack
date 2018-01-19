@@ -81,8 +81,7 @@ class AssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
     def __call__(self, inputs, memory, scope=None):
         inputs, address, reset = inputs
 
-        memory = memory * tf.expand_dims(reset, 2)
-
+        memory = memory * (1.0 - tf.expand_dims(reset, 2))
         read = tf.einsum('ab,abc->ac', address, memory)
         address_input = tf.layers.dense(address, self._slot_dim, use_bias=False)
         inputs = tf.concat([inputs, read, address_input], 1)
