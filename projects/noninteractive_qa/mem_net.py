@@ -29,7 +29,7 @@ def associative_mem_net(sequence, length, key_dim, num_slots, slot_dim, controll
     memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
 
     forward_memories, final_memory = tf.nn.dynamic_rnn(
-        memory_rnn, tf.concat([address_probs, reset_probs, sequence], 2), length, dtype=tf.float32)
+        memory_rnn, (sequence, address_probs, reset_probs), length, dtype=tf.float32)
 
     return forward_memories, final_memory, address_probs, reset_probs
 
@@ -43,9 +43,9 @@ def bidirectional_associative_mem_net(
     memory_rnn = BackwardAssociativeMemoryCell(num_slots, slot_dim)
 
     reset_probs_shifted = tf.concat([reset_probs[:, 1:, :], tf.zeros([tf.shape(reset_probs)[0], 1, num_slots])], 1)
-    inputs = tf.concat([reset_probs_shifted, forward_memories], 2)
-    inputs_rev = tf.reverse_sequence(inputs, length, 1)
-
+    forward_memories_rev = tf.reverse_sequence(forward_memories, length, 1)
+    reset_probs_shifted_rev = tf.reverse_sequence(reset_probs_shifted, length, 1)
+    inputs_rev = (forward_memories_rev, reset_probs_shifted_rev)
     rev_memories, _ = tf.nn.dynamic_rnn(memory_rnn, inputs_rev, length - 1, initial_state=final_memory)
     memories = tf.reverse_sequence(rev_memories, length, 1)
 
@@ -58,7 +58,8 @@ class BackwardAssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
         self._slot_dim = slot_dim
 
     def __call__(self, inputs, memory, scope=None):
-        forward_memory, reset = inputs[:, self._num_slots:], inputs[:, :self._num_slots, tf.newaxis]
+        forward_memory, reset = inputs
+        reset = tf.expand_dims(reset, 2)
         forward_memory = tf.reshape(forward_memory, [-1, self._num_slots, self._slot_dim])
         new_memory = reset * forward_memory + (1.0 - reset) * memory
         return tf.reshape(new_memory, [-1, self.output_size]), new_memory
@@ -78,9 +79,7 @@ class AssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
         self._slot_dim = slot_dim
 
     def __call__(self, inputs, memory, scope=None):
-        inputs, controls = inputs[:, 2 * self._num_slots:], inputs[:, :2 * self._num_slots]
-        address = controls[:, :self._num_slots]
-        reset = controls[:, self._num_slots:]
+        inputs, address, reset = inputs
 
         memory = memory * tf.expand_dims(reset, 2)
 
