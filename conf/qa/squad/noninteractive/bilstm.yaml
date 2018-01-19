@@ -1,0 +1,15 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 256
+dropout: 0.2
+
+reader: 'non_interactive_qa_reader'
+name: 'noninteractive_bilstm'
+
+encoder:
+  - input: 'text'
+    module: 'lstm'
+    dropout: True
+
+

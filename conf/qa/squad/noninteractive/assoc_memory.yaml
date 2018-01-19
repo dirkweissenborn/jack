@@ -1,0 +1,24 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 256
+dropout: 0.2
+
+reader: 'assoc_memory_qa_reader'
+name: 'assoc_memory_qa_reader'
+
+encoder:
+  - input: 'text'
+    module: 'lstm'
+    dropout: True
+
+memory_dim: &mem_dim 32
+
+memory:
+  key_dim: *mem_dim
+  num_slots: 5
+  slot_dim: *mem_dim
+  controller:
+    module: 'lstm'
+    repr_dim: *mem_dim
+

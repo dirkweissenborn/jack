@@ -1,0 +1,35 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 256
+dropout: 0.2
+
+reader: 'non_interactive_qa_reader'
+name: 'noninteractive_bilstm'
+
+encoder:
+  - input: 'text'
+    module: 'lstm'
+    dropout: True
+
+  - input: 'text'
+    output: 'projected'
+    repr_dim: 32
+    module: 'lstm'
+    dropout: True
+    with_projection: True
+    activation: 'tanh'
+
+  - input: 'projected'
+    output: 'self_attn'
+    module: 'self_attn'
+    attn_type: 'bilinear'
+    scaled: True
+    with_sentinel: True  # we gate the attention with an additional scalar sentinel because what we retrieve might actually not be what we were looking for because (softmax) attn always retrieves something
+    num_attn_heads: 5
+
+  - input: ['text', 'projected']
+    output: 'text'
+    module: 'concat'
+
+
