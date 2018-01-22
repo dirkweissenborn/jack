@@ -25,15 +25,32 @@ def bi_assoc_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_
 
     tf.identity(tf.nn.softmax(address_logits), name='access_probs')
 
+    reset_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), num_slots,
+                                   bias_initializer=tf.constant_initializer(-2.0))
+    reset_probs = tf.cond(is_eval,
+                          lambda: tf.round(tf.sigmoid(reset_logits)),
+                          lambda: gumbel_sigmoid(reset_logits))
+
+    reset_access_probs = tf.maximum(0.0, access_probs[:, 1:] - access_probs[:, :-1])
+    reset_access_probs = tf.concat([tf.zeros([tf.shape(access_probs)[0], 1, num_slots]), reset_access_probs], 1)
+    reset_probs_fw = tf.maximum(tf.minimum(reset_probs, 1.0 - access_probs), reset_access_probs)
+
+    reset_access_probs = tf.maximum(0.0, access_probs[:, :-1] - access_probs[:, 1:])
+    reset_access_probs = tf.concat([reset_access_probs, tf.zeros([tf.shape(access_probs)[0], 1, num_slots])], 1)
+    reset_probs_bw = tf.maximum(tf.minimum(reset_probs, 1.0 - access_probs), reset_access_probs)
+
+    tf.identity(tf.sigmoid(reset_logits), name='reset_probs')
+
     memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
-    reset_probs = tf.zeros_like(access_probs)
+
     fw_memories, _ = tf.nn.dynamic_rnn(
-        memory_rnn, (sequence, access_probs, reset_probs), length, dtype=tf.float32, scope='forward')
+        memory_rnn, (sequence, access_probs, reset_probs_fw), length, dtype=tf.float32, scope='forward')
 
     bw_memories, _ = tf.nn.dynamic_rnn(
         memory_rnn,
         (tf.reverse_sequence(sequence, length, seq_dim=1),
-         tf.reverse_sequence(access_probs, length, seq_dim=1), reset_probs), length,
+         tf.reverse_sequence(access_probs, length, seq_dim=1),
+         tf.reverse_sequence(reset_probs_bw, length, seq_dim=1)), length,
         dtype=tf.float32, scope='backward')
 
     memories = tf.split(tf.concat([fw_memories, tf.reverse_sequence(bw_memories, length, seq_dim=1)], 2), num_slots, 2)
