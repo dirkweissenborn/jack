@@ -136,7 +136,7 @@ class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
         with tf.variable_scope("memory"):
             memory_conf = shared_resources.config['memory']
             question_memory = bidirectional_associative_mem_net(
-                encoded_question, tensors.question_length,
+                emb_question, tensors.question_length,
                 memory_conf['key_dim'],
                 memory_conf['num_slots'],
                 memory_conf['slot_dim'],
@@ -144,7 +144,7 @@ class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
                 tensors.is_eval)[0]
         with tf.variable_scope("memory", reuse=True):
             support_memory = bidirectional_associative_mem_net(
-                encoded_support, tensors.support_length,
+                emb_support, tensors.support_length,
                 memory_conf['key_dim'],
                 memory_conf['num_slots'],
                 memory_conf['slot_dim'],
