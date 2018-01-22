@@ -95,8 +95,7 @@ class AssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
 
         memory *= (1.0 - tf.expand_dims(reset, 2))
         read = tf.einsum('ab,abc->ac', address, memory)
-        address_input = tf.layers.dense(address, self._slot_dim, use_bias=False)
-        new_state = self._cell(tf.concat([inputs, address_input], 1), read)[0]
+        new_state = self._cell(tf.concat([inputs, address], 1), read)[0]
         # new_state = tf.layers.dense(tf.layers.dense(inputs, self._slot_dim, tf.nn.relu), self._slot_dim, tf.nn.relu)
         # gate = tf.layers.dense(tf.concat([read, new_state], 1), self._slot_dim, tf.sigmoid)
         # new_state = gate * read + (1.0 - gate) * new_state
