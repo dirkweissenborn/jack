@@ -27,13 +27,19 @@ def bi_assoc_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_
 
     memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
     reset_probs = tf.zeros_like(access_probs)
-    memories, final_memory = tf.nn.bidirectional_dynamic_rnn(
+    fw_memories, _ = tf.nn.dynamic_rnn(
         memory_rnn, memory_rnn, (sequence, access_probs, reset_probs), length, dtype=tf.float32)
 
-    memories = tf.split(tf.concat(memories, 2), num_slots, 2)
+    bw_memories, _ = tf.nn.dynamic_rnn(
+        memory_rnn, memory_rnn,
+        (tf.reverse_sequence(sequence, length, seq_dim=1),
+         tf.reverse_sequence(access_probs, length, seq_dim=1), reset_probs), length,
+        dtype=tf.float32)
+
+    memories = tf.split(tf.concat([fw_memories, tf.reverse_sequence(bw_memories, length, seq_dim=1)], 2), num_slots, 2)
     memories = tf.concat([tf.layers.dense(m, slot_dim, tf.nn.relu) for m in memories], 2)
 
-    return tf.concat(memories, 2), final_memory, access_probs,
+    return tf.concat(memories, 2), access_probs
 
 
 def associative_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
