@@ -9,7 +9,7 @@ from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
-from projects.noninteractive_qa.mem_net import bidirectional_associative_mem_net
+from projects.noninteractive_qa.mem_net import bi_assoc_mem_net
 
 support_state_start_port = TensorPort(tf.float32, [None, None, None], 'support_states_start')
 support_state_end_port = TensorPort(tf.float32, [None, None, None], 'support_states_end')
@@ -135,7 +135,7 @@ class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
 
         with tf.variable_scope("memory"):
             memory_conf = shared_resources.config['memory']
-            question_memory = bidirectional_associative_mem_net(
+            question_memory = bi_assoc_mem_net(
                 emb_question, tensors.question_length,
                 memory_conf['key_dim'],
                 memory_conf['num_slots'],
@@ -143,7 +143,7 @@ class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
                 memory_conf['controller'],
                 tensors.is_eval)[0]
         with tf.variable_scope("memory", reuse=True):
-            support_memory = bidirectional_associative_mem_net(
+            support_memory = bi_assoc_mem_net(
                 emb_support, tensors.support_length,
                 memory_conf['key_dim'],
                 memory_conf['num_slots'],

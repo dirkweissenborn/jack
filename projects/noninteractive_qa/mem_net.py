@@ -13,10 +13,33 @@ def gumbel_sigmoid(logits):
     return dist.sample()
 
 
+def bi_assoc_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
+    controller_out = modular_encoder(
+        controller_config, {'text': sequence}, {'text': length}, {},
+        key_dim, 0.0, is_eval=is_eval)[0]['text']
+
+    address_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), num_slots, use_bias=False)
+    access_probs = tf.cond(is_eval,
+                           lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
+                           lambda: gumbel_softmax(address_logits))
+
+    tf.identity(tf.nn.softmax(address_logits), name='access_probs')
+
+    memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
+    reset_probs = tf.zeros_like(access_probs)
+    memories, final_memory = tf.nn.bidirectional_dynamic_rnn(
+        memory_rnn, memory_rnn, (sequence, access_probs, reset_probs), length, dtype=tf.float32)
+
+    memories = tf.split(tf.concat(memories, 2), num_slots, 2)
+    memories = tf.concat([tf.layers.dense(m, slot_dim, tf.nn.relu) for m in memories], 2)
+
+    return tf.concat(memories, 2), final_memory, access_probs,
+
+
 def associative_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
     controller_out = modular_encoder(
         controller_config, {'text': sequence}, {'text': length}, {},
-        key_dim, controller_config.get('dropout', 0.0), is_eval=is_eval)[0]['text']
+        key_dim, 0.0, is_eval=is_eval)[0]['text']
 
     address_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), num_slots, use_bias=False)
     access_probs = tf.cond(is_eval,
