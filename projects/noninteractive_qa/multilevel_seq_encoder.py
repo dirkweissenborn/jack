@@ -115,9 +115,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
 
-def assoc_memory_encoder(length, repr_dim, num_slots, controller_out, frame_probs, governor,
-                         segm_probs, segms, is_eval):
-    inputs = tf.concat([controller_out, governor], 2)
+def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_probs, segms, is_eval):
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_probs_horizontal = horizontal_probs(address_logits, length, frame_probs, is_eval)
