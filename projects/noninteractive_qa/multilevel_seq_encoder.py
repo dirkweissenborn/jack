@@ -30,9 +30,9 @@ def gumbel_logits(logits):
 
 
 def horizontal_probs(logits, length, segm_probs, is_eval):
-    logits = tf.cond(is_eval, lambda: 100.0 * logits, lambda: gumbel_logits(logits))
-    exps = tf.exp(logits - tf.reduce_max(logits, 1, keep_dims=True))
-    summed_exps = tf.minimum(intra_segm_sum(exps, segm_probs, length), exps)  # probs should not be bigger than 1
+    logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
+    exps = tf.exp(logits)
+    summed_exps = tf.maximum(intra_segm_sum(exps, segm_probs, length), exps)  # probs should not be bigger than 1
     return exps / (summed_exps + 1e-6)
 
 
@@ -105,7 +105,7 @@ def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
     governor_logits += (segm_probs - 1.0) * 10  # mask non segment ends
-    governor_probs = horizontal_probs(governor_logits, length, segm_probs, is_eval)
+    governor_probs = horizontal_probs(governor_logits, length, frame_boundary, is_eval)
     tf.identity(governor_probs, name='governor_probs')
 
     govenors = intra_segm_sum(governor_probs * segms, frame_boundary, length)
