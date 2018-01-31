@@ -10,7 +10,8 @@ from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
-from projects.noninteractive_qa.multilevel_seq_encoder import segmentation_encoder, governor_detection_encoder
+from projects.noninteractive_qa.multilevel_seq_encoder import segmentation_encoder, governor_detection_encoder, \
+    assoc_memory_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -133,14 +134,19 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 representations = {"ctrl": controller_out}
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
-                    segment_reps, segm_probs, segm_logits = segmentation_encoder(
+                    segms, segm_probs, segm_logits = segmentation_encoder(
                         inputs, length, repr_dim, controller_out, tensors.is_eval)
-                    representations['segm'] = segment_reps
-                    govenors, boundary_probs, boundary_logits, _, _ = governor_detection_encoder(
-                        inputs, length, repr_dim, controller_out, segm_probs, segment_reps, tensors.is_eval)
-                    representations['governor'] = govenors
+                    representations['segm'] = segms
+                    governor, frame_probs, boundary_logits, _, _ = governor_detection_encoder(
+                        length, repr_dim, controller_out, segm_probs, segms, tensors.is_eval)
+                    representations['governor'] = governor
+                    if shared_resources.config.get('num_slots', 0):
+                        memory, _, _ = assoc_memory_encoder(
+                            length, repr_dim, shared_resources.config['num_slots'], controller_out, frame_probs,
+                            governor, segm_probs, segms, tensors.is_eval)
+                        representations['assoc'] = memory
 
-            return representations, boundary_probs, boundary_logits, segm_probs, segm_logits
+            return representations, frame_probs, boundary_logits, segm_probs, segm_logits
 
         encoded_question, q_boundary_probs, q_boundary_logits, q_segm_probs, q_segm_logits = encoding(
             emb_question, tensors.question_length)

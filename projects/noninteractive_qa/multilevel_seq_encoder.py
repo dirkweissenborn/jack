@@ -95,7 +95,7 @@ def segmentation_encoder(sequence, length, repr_dim, controller_out, is_eval):
     return segment_reps, segm_probs, segm_logits
 
 
-def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_probs, segms, is_eval):
+def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, segms, is_eval):
     frame_end_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1,
                                        bias_initializer=tf.constant_initializer(0.0))
     frame_probs = tf.cond(is_eval,
@@ -105,7 +105,7 @@ def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
-    governor_logits += (segm_probs - 1.0) * 100  # mask non segment ends
+    governor_logits += (segm_probs - 1.0) * 10  # mask non segment ends
     # frame_probs = tf.Print(frame_probs, [frame_probs], message='frame_probs', summarize=10)
     governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
     tf.identity(governor_probs, name='governor_probs')
@@ -113,6 +113,25 @@ def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_
     govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)
 
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
+
+
+def assoc_memory_encoder(length, repr_dim, num_slots, controller_out, frame_probs, governor,
+                         segm_probs, segms, is_eval):
+    inputs = tf.concat([controller_out, governor], 2)
+    address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
+                                     bias_initializer=tf.constant_initializer(0.0))
+    address_probs_horizontal = horizontal_probs(address_logits, length, frame_probs, is_eval)
+    address_probs = tf.cond(is_eval,
+                            lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
+                            lambda: gumbel_softmax(address_logits))
+    address_probs *= segm_probs * address_probs_horizontal
+
+    tf.identity(tf.nn.softmax(address_logits), name='address_probs')
+    memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
+    memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
+    memory = intra_segm_sum(memory, frame_probs, length)
+
+    return memory, address_probs, address_logits
 
 
 class PropagationCell(tf.nn.rnn_cell.RNNCell):

@@ -8,11 +8,14 @@ reader: 'multi_level_noninteractive_qa_reader'
 name: 'multi_level_noninteractive_qa_reader'
 
 
-prediction_levels: ['word', 'segm', 'governor']
+prediction_levels: ['word', 'ctrl', 'segm', 'governor', 'assoc']
+
+num_slots: 5
 
 controller:
   encoder:
-    - module: 'lstm'
+    - module: 'conv_glu'
       input: 'text'
-
+      conv_width: 5
+      num_layers: 2
 
