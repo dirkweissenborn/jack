@@ -124,9 +124,9 @@ def assoc_memory_encoder(length, repr_dim, num_slots, controller_out, frame_prob
     address_probs = tf.cond(is_eval,
                             lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
                             lambda: gumbel_softmax(address_logits))
-    address_probs *= segm_probs * address_probs_horizontal
+    address_probs *= tf.stop_gradient(segm_probs) * address_probs_horizontal
 
-    tf.identity(tf.nn.softmax(address_logits), name='address_probs')
+    tf.identity(tf.nn.softmax(address_logits) * address_probs_horizontal * segm_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
     memory = intra_segm_sum(memory, frame_probs, length)
