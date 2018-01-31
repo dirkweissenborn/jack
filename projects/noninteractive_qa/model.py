@@ -159,11 +159,27 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
         all_start_scores = []
         all_end_scores = []
-        for k in shared_resources.config['prediction_levels']:
-            start_scores, end_scores, _ = _simple_answer_layer(
-                encoded_question[k], encoded_support[k], repr_dim, shared_resources, tensors)
-            all_start_scores.append(start_scores)
-            all_end_scores.append(end_scores)
+        # computing single time attention over question
+        full_encoded_question = [encoded_question[k] for k in shared_resources.config['prediction_levels']]
+        full_encoded_question = tf.concat(full_encoded_question, 2)
+        question_state = compute_question_state(full_encoded_question, tensors.question_length)
+        question_state = tf.gather(question_state, tensors.support2question)
+        question_state = tf.split(question_state, len(shared_resources.config['prediction_levels']), 1)
+        for q, k in zip(question_state, shared_resources.config['prediction_levels']):
+            with tf.variable_scope(k) as vs:
+                question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
+                question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
+                vs.reuse_variables()
+                hidden = tf.layers.dense(encoded_support[k], 2 * repr_dim, tf.nn.relu, name="hidden")
+                hidden_start, hidden_end = tf.split(hidden, 2, 2)
+                support_mask = misc.mask_for_lengths(tensors.support_length)
+                start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
+                start_scores = start_scores + support_mask
+                end_scores = tf.einsum('ik,ijk->ij', question_hidden_end, hidden_end)
+                end_scores = end_scores + support_mask
+
+                all_start_scores.append(start_scores)
+                all_end_scores.append(end_scores)
 
         start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
             compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
