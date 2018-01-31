@@ -33,13 +33,15 @@ def horizontal_probs(logits, length, segm_probs, is_eval):
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
     exps = tf.exp(logits)
     summed_exps = tf.maximum(intra_segm_sum(exps, segm_probs, length), exps)  # probs should not be bigger than 1
-    return exps / (summed_exps + 1e-6)
+    # exps = tf.Print(exps, [exps], message='exp', summarize=10)
+    # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
+    return exps / (summed_exps + 1e-10)
 
 
 def intra_segm_sum(inputs, segm_probs, length):
     repr_dim = inputs.get_shape()[-1].value
-    reset = 1.0 - segm_probs
-    sum_fw, end_state = tf.nn.dynamic_rnn(_SumReset(repr_dim), (inputs, reset), length, dtype=tf.float32)
+    keep = 1.0 - segm_probs
+    sum_fw, end_state = tf.nn.dynamic_rnn(_SumReset(repr_dim), (inputs, keep), length, dtype=tf.float32)
     sum_fw_rev = tf.reverse_sequence(sum_fw, length, 1)
     segm_rev = tf.reverse_sequence(segm_probs, length, 1)
     summ = tf.nn.dynamic_rnn(PropagationCell(repr_dim), (sum_fw_rev, segm_rev), length, initial_state=end_state)[0]
@@ -52,9 +54,9 @@ class _SumReset(tf.nn.rnn_cell.RNNCell):
         self._repr_dim = repr_dim
 
     def __call__(self, inputs, state, scope=None):
-        inputs, reset = inputs
+        inputs, keep = inputs
         state += inputs
-        return state, state * reset
+        return state, state * keep
 
     @property
     def output_size(self):
@@ -94,23 +96,23 @@ def segmentation_encoder(sequence, length, repr_dim, controller_out, is_eval):
 
 
 def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_probs, segms, is_eval):
-    boundary_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1,
-                                      bias_initializer=tf.constant_initializer(0.0))
-    frame_boundary = tf.cond(is_eval,
-                             lambda: tf.round(tf.sigmoid(boundary_logits)),
-                             lambda: gumbel_sigmoid(boundary_logits))
-    segm_probs_shift = tf.concat([tf.ones([tf.shape(segm_probs)[0], 1, 1]), segm_probs[:, :-1]], 1)
-    frame_boundary *= tf.stop_gradient(segm_probs_shift)
-    tf.identity(tf.sigmoid(boundary_logits), name='frame_boundary')
+    frame_end_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1,
+                                       bias_initializer=tf.constant_initializer(0.0))
+    frame_probs = tf.cond(is_eval,
+                          lambda: tf.round(tf.sigmoid(frame_end_logits)),
+                          lambda: gumbel_sigmoid(frame_end_logits))
+    frame_probs *= tf.stop_gradient(segm_probs)
+    tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
-    governor_logits += (segm_probs - 1.0) * 10  # mask non segment ends
-    governor_probs = horizontal_probs(governor_logits, length, frame_boundary, is_eval)
+    governor_logits += (segm_probs - 1.0) * 100  # mask non segment ends
+    # frame_probs = tf.Print(frame_probs, [frame_probs], message='frame_probs', summarize=10)
+    governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
     tf.identity(governor_probs, name='governor_probs')
 
-    govenors = intra_segm_sum(governor_probs * segms, frame_boundary, length)
+    govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)
 
-    return govenors, frame_boundary, boundary_logits, governor_probs, governor_logits
+    return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
 
 class PropagationCell(tf.nn.rnn_cell.RNNCell):
