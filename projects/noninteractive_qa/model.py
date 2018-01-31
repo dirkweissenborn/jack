@@ -161,10 +161,11 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
         all_end_scores = []
         # computing single time attention over question
         full_encoded_question = [encoded_question[k] for k in shared_resources.config['prediction_levels']]
+        full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
         full_encoded_question = tf.concat(full_encoded_question, 2)
         question_state = compute_question_state(full_encoded_question, tensors.question_length)
         question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state, len(shared_resources.config['prediction_levels']), 1)
+        question_state = tf.split(question_state, full_encoded_question_splits, 1)
         for q, k in zip(question_state, shared_resources.config['prediction_levels']):
             with tf.variable_scope(k) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
