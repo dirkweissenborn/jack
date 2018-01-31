@@ -108,9 +108,9 @@ def modular_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
 
 
 @extractive_qa_reader
-def assoc_memory_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    from projects.noninteractive_qa.model import BidirectionalAssociativeMemoryQAModule
-    return _tf_extractive_qa_reader(BidirectionalAssociativeMemoryQAModule, resources_or_conf)
+def multi_level_noninteractive_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.noninteractive_qa.model import MultilevelSequenceEncoderQAModule
+    return _tf_extractive_qa_reader(MultilevelSequenceEncoderQAModule, resources_or_conf)
 
 
 @extractive_qa_reader

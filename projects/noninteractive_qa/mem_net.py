@@ -4,11 +4,19 @@ from jack.tfutil.modular_encoder import modular_encoder
 
 
 def gumbel_softmax(logits):
-    dist = tf.contrib.distributions.RelaxedOneHotCategorical(1.0 / logits.get_shape()[-1].value, logits=logits)
+    step = tf.train.get_global_step()
+    if step is not None:
+        step = tf.to_float(step)
+        logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
+    dist = tf.contrib.distributions.RelaxedOneHotCategorical(0.5, logits=logits)
     return dist.sample()
 
 
 def gumbel_sigmoid(logits):
+    step = tf.train.get_global_step()
+    if step is not None:
+        step = tf.to_float(step)
+        logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
     dist = tf.contrib.distributions.RelaxedBernoulli(0.5, logits=logits)
     return dist.sample()
 
@@ -59,42 +67,91 @@ def bi_assoc_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_
     return tf.concat(memories, 2), access_probs
 
 
-def associative_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
+class _SumReset(tf.nn.rnn_cell.RNNCell):
+    def __init__(self, num_slots):
+        self._num_slots = num_slots
+
+    def __call__(self, inputs, state, scope=None):
+        scores, reset = inputs
+        state *= reset
+        state += scores
+        return state, state
+
+    @property
+    def output_size(self):
+        return self._num_slots
+
+    @property
+    def state_size(self):
+        return self._num_slots
+
+
+def segmentation_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
+    num_slots = 1
     controller_out = modular_encoder(
-        controller_config, {'text': sequence}, {'text': length}, {},
+        controller_config['encoder'], {'text': sequence}, {'text': length}, {},
         key_dim, 0.0, is_eval=is_eval)[0]['text']
 
-    write_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), 1,
-                                   bias_initializer=tf.constant_initializer(-2.0))
+    write_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), 1)
     write_probs = tf.cond(is_eval,
                           lambda: tf.round(tf.sigmoid(write_logits)),
                           lambda: gumbel_sigmoid(write_logits))
+
+    tf.add_to_collection(
+        tf.GraphKeys.LOSSES,
+        controller_config.get('lambda_write', 0.0001) * tf.reduce_mean(
+            tf.reduce_sum(tf.sigmoid(write_logits), reduction_indices=[1, 2])))
+
+    tf.identity(tf.nn.sigmoid(write_logits), name='write_probs')
+    tf.identity(write_probs, name='address_probs')
+    reset_probs = tf.concat([tf.zeros([tf.shape(write_probs)[0], 1, 1]), write_probs[:, :-1]], 1)
+    tf.identity(reset_probs, name='reset_probs')
+    memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
+    forward_memories, final_memory = tf.nn.dynamic_rnn(
+        memory_rnn, (sequence, write_probs, reset_probs), length, dtype=tf.float32)
+
+    return forward_memories[:, :, -slot_dim:], final_memory[0], controller_out, write_probs, reset_probs
+
+
+def associative_mem_net(sequence, length, key_dim, num_slots, slot_dim, controller_config, is_eval):
+    controller_out = modular_encoder(
+        controller_config['encoder'], {'text': sequence}, {'text': length}, {},
+        key_dim, 0.0, is_eval=is_eval)[0]['text']
+
+    write_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), 1,
+                                   bias_initializer=tf.constant_initializer(0.0))
+    write_probs = tf.cond(is_eval,
+                          lambda: tf.round(tf.sigmoid(write_logits)),
+                          lambda: gumbel_sigmoid(write_logits))
+
+    tf.add_to_collection(
+        tf.GraphKeys.LOSSES,
+        controller_config.get('lambda_write', 0.0) * tf.reduce_mean(
+            tf.reduce_sum(tf.sigmoid(write_logits), reduction_indices=[1, 2])))
     tf.identity(tf.nn.sigmoid(write_logits), name='write_probs')
 
+    reset_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), 1,
+                                   bias_initializer=tf.constant_initializer(0.0))
+    reset_probs = tf.cond(is_eval,
+                          lambda: tf.round(tf.sigmoid(reset_logits)),
+                          lambda: gumbel_sigmoid(reset_logits))
+    buffer_reset_probs = tf.concat([tf.ones([tf.shape(write_probs)[0], 1, 1]), write_probs[:, :-1]], 1)
+    reset_probs *= buffer_reset_probs
     address_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), num_slots, use_bias=False)
     address_probs = tf.cond(is_eval,
                             lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
                             lambda: gumbel_softmax(address_logits))
-    tf.identity(tf.nn.softmax(address_logits) * tf.nn.sigmoid(write_probs), name='address_probs')
     address_probs *= write_probs
 
-    reset_logits = tf.layers.dense(tf.layers.dense(controller_out, key_dim), num_slots,
-                                   bias_initializer=tf.constant_initializer(-3.0))
-    reset_probs = tf.cond(is_eval,
-                          lambda: tf.round(tf.sigmoid(reset_logits)),
-                          lambda: gumbel_sigmoid(reset_logits))
-
-    reset_address_probs = tf.maximum(0.0, address_probs[:, 1:] - address_probs[:, :-1])
-
-    reset_address_probs = tf.concat([tf.zeros([tf.shape(address_probs)[0], 1, num_slots]), reset_address_probs], 1)
-    reset_probs = tf.maximum(tf.minimum(reset_probs, 1.0 - address_probs), reset_address_probs)
-
+    tf.identity(tf.nn.softmax(address_logits) * tf.nn.sigmoid(write_logits), name='address_probs')
     tf.identity(tf.sigmoid(reset_logits), name='reset_probs')
 
-    memory_rnn = AssociativeMemoryCell(num_slots, slot_dim, slot_dim)
+    memory_rnn = AssociativeMemoryCell(num_slots, slot_dim)
 
     forward_memories, final_memory = tf.nn.dynamic_rnn(
         memory_rnn, (sequence, address_probs, reset_probs), length, dtype=tf.float32)
+
+    reset_probs = tf.concat([tf.tile(reset_probs, [1, 1, num_slots]), buffer_reset_probs], 2)
 
     return forward_memories, final_memory[0], address_probs, reset_probs
 
@@ -106,7 +163,8 @@ def bidirectional_associative_mem_net(sequence, length, key_dim, num_slots, slot
     # copy memory states back through time, between memory states
     memory_rnn = BackwardAssociativeMemoryCell(num_slots, slot_dim)
 
-    reset_probs_shifted = tf.concat([reset_probs[:, 1:, :], tf.zeros([tf.shape(reset_probs)[0], 1, num_slots])], 1)
+    reset_probs_shifted = tf.concat(
+        [reset_probs[:, 1:, :], tf.zeros([tf.shape(reset_probs)[0], 1, tf.shape(reset_probs)[2]])], 1)
     forward_memories_rev = tf.reverse_sequence(forward_memories, length, 1)
     reset_probs_shifted_rev = tf.reverse_sequence(reset_probs_shifted, length, 1)
     inputs_rev = (forward_memories_rev, reset_probs_shifted_rev)
@@ -118,7 +176,7 @@ def bidirectional_associative_mem_net(sequence, length, key_dim, num_slots, slot
 
 class BackwardAssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, num_slots, slot_dim):
-        self._num_slots = num_slots
+        self._num_slots = num_slots + 1
         self._slot_dim = slot_dim
 
     def __call__(self, inputs, memory, scope=None):
@@ -138,34 +196,35 @@ class BackwardAssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
 
 
 class AssociativeMemoryCell(tf.nn.rnn_cell.RNNCell):
-    def __init__(self, num_slots, slot_dim, buffer_dim):
+    def __init__(self, num_slots, slot_dim):
         self._num_slots = num_slots
         self._slot_dim = slot_dim
-        self._buffer_dim = buffer_dim
-        self._cell = tf.contrib.rnn.GRUBlockCell(self._buffer_dim)
+        self._cell = tf.contrib.rnn.GRUBlockCell(slot_dim)
 
     def __call__(self, inputs, state, scope=None):
         inputs, address, reset = inputs
         memory, buffer_state = state
-
+        memory = memory[:, :self._num_slots]
         write2memory = tf.reduce_sum(address, -1, keep_dims=True)
 
         memory *= (1.0 - tf.expand_dims(reset, 2))
         new_buffer_state = self._cell(inputs, buffer_state)[0]
         new_state = tf.layers.dense(new_buffer_state, self._num_slots * self._slot_dim, tf.nn.relu)
+        new_state = tf.reshape(new_state, [-1, self._num_slots, self._slot_dim])
         address = tf.expand_dims(address, 2)
-        new_memory = (1.0 - address) * memory + address * tf.reshape(new_state, [-1, self._num_slots, self._slot_dim])
-
+        new_state = address * new_state
+        new_memory = (1.0 - address) * memory + new_state
+        out = tf.concat([tf.reshape(new_memory, [-1, self._num_slots * self._slot_dim]), new_buffer_state], 1)
         new_buffer_state *= (1.0 - write2memory)
-        return tf.reshape(new_memory, [-1, self.output_size]), (new_memory, new_buffer_state)
+        return out, (tf.reshape(out, [-1, self._num_slots + 1, self._slot_dim]), new_buffer_state)
 
     @property
     def output_size(self):
-        return self._num_slots * self._slot_dim
+        return (self._num_slots + 1) * self._slot_dim
 
     @property
     def state_size(self):
-        return (tf.TensorShape([self._num_slots, self._slot_dim]), self._buffer_dim)
+        return (tf.TensorShape([self._num_slots + 1, self._slot_dim]), self._slot_dim)
 
 
 class AssociativeBoWMemoryCell(tf.nn.rnn_cell.RNNCell):

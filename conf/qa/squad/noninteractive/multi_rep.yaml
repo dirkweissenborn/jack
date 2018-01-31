@@ -1,0 +1,18 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 128
+dropout: 0.2
+
+reader: 'multi_level_noninteractive_qa_reader'
+name: 'multi_level_noninteractive_qa_reader'
+
+
+prediction_levels: ['word', 'segm', 'governor']
+
+controller:
+  encoder:
+    - module: 'lstm'
+      input: 'text'
+
+

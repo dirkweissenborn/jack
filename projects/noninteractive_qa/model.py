@@ -9,18 +9,14 @@ from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
-from projects.noninteractive_qa.mem_net import bidirectional_associative_mem_net
-
-support_state_start_port = TensorPort(tf.float32, [None, None, None], 'support_states_start')
-support_state_end_port = TensorPort(tf.float32, [None, None, None], 'support_states_end')
-question_state_start_port = TensorPort(tf.float32, [None, None], 'question_state_start')
-question_state_end_port = TensorPort(tf.float32, [None, None], 'question_state_end')
+from jack.tfutil.xqa import xqa_crossentropy_loss
+from projects.noninteractive_qa.multilevel_seq_encoder import segmentation_encoder, governor_detection_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
     # @property
     # def training_input_ports(self) -> Sequence[TensorPort]:
-    #    return super().training_input_ports
+    #   return super().training_input_ports
 
     # @property
     # def output_ports(self) -> Sequence[TensorPort]:
@@ -78,14 +74,18 @@ class NonInteractiveModularQAModule(AbstractXQAModelModule):
         return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
 
 
-class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
-    # @property
-    # def training_input_ports(self) -> Sequence[TensorPort]:
-    #    return super().training_input_ports
+all_start_scores = TensorPort(tf.float32, [None, None, None], 'all_start_scores')
+all_end_scores = TensorPort(tf.float32, [None, None, None], 'all_end_scores')
 
-    # @property
-    # def output_ports(self) -> Sequence[TensorPort]:
-    #    return super().output_ports + [question_state_start_port, question_state_end_port]
+
+class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
+    @property
+    def training_input_ports(self) -> Sequence[TensorPort]:
+        return super().training_input_ports + [all_start_scores, all_end_scores]
+
+    @property
+    def output_ports(self) -> Sequence[TensorPort]:
+        return super().output_ports + [all_start_scores, all_end_scores]
 
     def create_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
@@ -122,42 +122,68 @@ class BidirectionalAssociativeMemoryQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
-        with tf.variable_scope("encoder") as vs:
-            encoded_question = modular_encoder(
-                shared_resources.config['encoder'],
-                {'text': emb_question}, {'text': tensors.question_length}, {},
-                repr_dim, dropout, tensors.is_eval)[0]['text']
-            vs.reuse_variables()
-            encoded_support = modular_encoder(
-                shared_resources.config['encoder'],
-                {'text': emb_support}, {'text': tensors.support_length}, {},
-                repr_dim, dropout, tensors.is_eval)[0]['text']
+        def encoding(inputs, length, reuse=False):
+            with tf.variable_scope("encoding", reuse=reuse):
+                with tf.variable_scope("controller"):
+                    controller_out = modular_encoder(
+                        shared_resources.config['controller']['encoder'],
+                        {'text': inputs}, {'text': length}, {},
+                        repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
-        with tf.variable_scope("memory"):
-            memory_conf = shared_resources.config['memory']
-            question_memory = bidirectional_associative_mem_net(
-                emb_question, tensors.question_length,
-                memory_conf['key_dim'],
-                memory_conf['num_slots'],
-                memory_conf['slot_dim'],
-                memory_conf['controller'],
-                tensors.is_eval)[0]
-        with tf.variable_scope("memory", reuse=True):
-            support_memory = bidirectional_associative_mem_net(
-                emb_support, tensors.support_length,
-                memory_conf['key_dim'],
-                memory_conf['num_slots'],
-                memory_conf['slot_dim'],
-                memory_conf['controller'],
-                tensors.is_eval)[0]
+                representations = {"ctrl": controller_out}
+                with tf.variable_scope("representations"):
+                    representations['word'] = inputs
+                    segment_reps, segm_probs, segm_logits = segmentation_encoder(
+                        inputs, length, repr_dim, controller_out, tensors.is_eval)
+                    representations['segm'] = segment_reps
+                    govenors, boundary_probs, boundary_logits, _, _ = governor_detection_encoder(
+                        inputs, length, repr_dim, controller_out, segm_probs, segment_reps, tensors.is_eval)
+                    representations['governor'] = govenors
 
-        encoded_question = tf.concat([encoded_question, question_memory], axis=2)
-        encoded_support = tf.concat([encoded_support, support_memory], axis=2)
+            return representations, boundary_probs, boundary_logits, segm_probs, segm_logits
 
-        start_scores, end_scores, span = _simple_answer_layer(
-            encoded_question, encoded_support, repr_dim, shared_resources, tensors)
+        encoded_question, q_boundary_probs, q_boundary_logits, q_segm_probs, q_segm_logits = encoding(
+            emb_question, tensors.question_length)
+        encoded_support, s_boundary_probs, s_boundary_logits, s_segm_probs, s_segm_logits = encoding(
+            emb_support, tensors.support_length, True)
 
-        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
+        # enforce no boundary in question
+        q_mask = tf.expand_dims(tf.sequence_mask(tensors.question_length - 1, dtype=tf.float32), 2)
+        tf.add_to_collection(
+            tf.GraphKeys.LOSSES,
+            shared_resources.config.get('lambda_boundary', 0.0) *
+            tf.reduce_mean(
+                tf.reduce_sum(q_boundary_probs[:, 1:] * q_mask, reduction_indices=[1, 2]) -
+                tf.reduce_sum(q_boundary_probs[:, 0], 1)
+            ))
+
+        all_start_scores = []
+        all_end_scores = []
+        for k in shared_resources.config['prediction_levels']:
+            start_scores, end_scores, _ = _simple_answer_layer(
+                encoded_question[k], encoded_support[k], repr_dim, shared_resources, tensors)
+            all_start_scores.append(start_scores)
+            all_end_scores.append(end_scores)
+
+        start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
+            compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
+                          tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
+        span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
+
+        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span,
+                                                         tf.stack(all_start_scores), tf.stack(all_end_scores)))
+
+    def create_training_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+        level_losses = []
+        for s, e in zip(tf.unstack(tensors.all_start_scores), tf.unstack(tensors.all_end_scores)):
+            level_losses.append(xqa_crossentropy_loss(
+                s, e, tensors.answer_span, tensors.answer2support, tensors.support2question,
+                use_sum=shared_resources.config.get('loss', 'sum') == 'sum'))
+        loss = tf.reduce_sum(level_losses)
+        if tf.get_collection(tf.GraphKeys.LOSSES):
+            loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
+        return {Ports.loss: loss}
 
 
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
