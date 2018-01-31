@@ -79,13 +79,13 @@ all_end_scores = TensorPort(tf.float32, [None, None, None], 'all_end_scores')
 
 
 class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
-    @property
-    def training_input_ports(self) -> Sequence[TensorPort]:
-        return super().training_input_ports + [all_start_scores, all_end_scores]
+    # @property
+    # def training_input_ports(self) -> Sequence[TensorPort]:
+    #    return super().training_input_ports + [all_start_scores, all_end_scores]
 
-    @property
-    def output_ports(self) -> Sequence[TensorPort]:
-        return super().output_ports + [all_start_scores, all_end_scores]
+    # @property
+    # def output_ports(self) -> Sequence[TensorPort]:
+    #    return super().output_ports + [all_start_scores, all_end_scores]
 
     def create_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
@@ -170,17 +170,14 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                           tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
-        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span,
-                                                         tf.stack(all_start_scores), tf.stack(all_end_scores)))
+        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
 
     def create_training_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
-        level_losses = []
-        for s, e in zip(tf.unstack(tensors.all_start_scores), tf.unstack(tensors.all_end_scores)):
-            level_losses.append(xqa_crossentropy_loss(
-                s, e, tensors.answer_span, tensors.answer2support, tensors.support2question,
-                use_sum=shared_resources.config.get('loss', 'sum') == 'sum'))
-        loss = tf.reduce_sum(level_losses)
+        loss = xqa_crossentropy_loss(
+            tensors.start_scores, tensors.end_scores, tensors.answer_span,
+            tensors.answer2support, tensors.support2question,
+            use_sum=shared_resources.config.get('loss', 'sum') == 'sum')
         if tf.get_collection(tf.GraphKeys.LOSSES):
             loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
         return {Ports.loss: loss}
