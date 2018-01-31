@@ -40,7 +40,6 @@ def intra_segm_sum(inputs, segm_probs, length):
     repr_dim = inputs.get_shape()[-1].value
     reset = 1.0 - segm_probs
     sum_fw, end_state = tf.nn.dynamic_rnn(_SumReset(repr_dim), (inputs, reset), length, dtype=tf.float32)
-    sum_fw = tf.Print(sum_fw, [sum_fw[0]], message='sum_fw', summarize=100)
     sum_fw_rev = tf.reverse_sequence(sum_fw, length, 1)
     segm_rev = tf.reverse_sequence(segm_probs, length, 1)
     summ = tf.nn.dynamic_rnn(PropagationCell(repr_dim), (sum_fw_rev, segm_rev), length, initial_state=end_state)[0]
@@ -107,7 +106,6 @@ def governor_detection_encoder(sequence, length, repr_dim, controller_out, segm_
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
     governor_logits += (segm_probs - 1.0) * 10  # mask non segment ends
     governor_probs = horizontal_probs(governor_logits, length, segm_probs, is_eval)
-    governor_probs = tf.Print(governor_probs, [governor_probs[0]], message='governor', summarize=100)
     tf.identity(governor_probs, name='governor_probs')
 
     govenors = intra_segm_sum(governor_probs * segms, frame_boundary, length)
