@@ -22,20 +22,21 @@ def gumbel_sigmoid(logits):
     return dist.sample()
 
 
-def gumbel_logits(logits):
+def gumbel_logits(logits, temp=0.5):
     uniform = tf.random_uniform(
         shape=tf.shape(logits), minval=np.finfo(np.float32).tiny, maxval=1., dtype=tf.float32)
     gumbel = -tf.log(-tf.log(uniform))
-    return tf.div(gumbel + logits, 0.5)
+    return tf.div(gumbel + logits, temp)
 
 
 def horizontal_probs(logits, length, segm_probs, is_eval):
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
-    exps = tf.exp(logits)
+    exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
     summed_exps = tf.maximum(intra_segm_sum(exps, segm_probs, length), exps)  # probs should not be bigger than 1
     # exps = tf.Print(exps, [exps], message='exp', summarize=10)
     # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
-    return exps / (summed_exps + 1e-10)
+    probs = exps / (summed_exps + 1e-8)
+    return probs
 
 
 def intra_segm_sum(inputs, segm_probs, length):
@@ -119,10 +120,10 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_probs_horizontal = horizontal_probs(address_logits, length, frame_probs, is_eval)
-    address_probs = tf.cond(is_eval,
-                            lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
-                            lambda: gumbel_softmax(address_logits))
-    address_probs *= tf.stop_gradient(segm_probs) * address_probs_horizontal
+    address_probs_vertical = tf.cond(is_eval,
+                                     lambda: tf.one_hot(tf.argmax(address_logits, axis=-1), num_slots, axis=-1),
+                                     lambda: gumbel_softmax(address_logits))
+    address_probs = tf.stop_gradient(segm_probs) * address_probs_horizontal * address_probs_vertical
 
     tf.identity(tf.nn.softmax(address_logits) * address_probs_horizontal * segm_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)

@@ -145,7 +145,8 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], state, frame_probs,
                             segm_probs, segms, tensors.is_eval)
-                        representations['assoc'] = memory
+                        for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
+                            representations['assoc_' + str(i)] = m
 
             return representations, frame_probs, boundary_logits, segm_probs, segm_logits
 
@@ -167,13 +168,16 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
         all_start_scores = []
         all_end_scores = []
         # computing single time attention over question
-        full_encoded_question = [encoded_question[k] for k in shared_resources.config['prediction_levels']]
+        prediction_levels = [k for k in encoded_question if
+                             any(k.startswith(k2) for k2 in shared_resources.config['prediction_levels'])]
+        print(prediction_levels)
+        full_encoded_question = [encoded_question[k] for k in prediction_levels]
         full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
         full_encoded_question = tf.concat(full_encoded_question, 2)
         question_state = compute_question_state(full_encoded_question, tensors.question_length)
         question_state = tf.gather(question_state, tensors.support2question)
         question_state = tf.split(question_state, full_encoded_question_splits, 1)
-        for q, k in zip(question_state, shared_resources.config['prediction_levels']):
+        for q, k in zip(question_state, prediction_levels):
             with tf.variable_scope(k) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
                 question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
