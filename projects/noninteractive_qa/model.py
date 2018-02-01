@@ -170,7 +170,6 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
         # computing single time attention over question
         prediction_levels = [k for k in encoded_question if
                              any(k.startswith(k2) for k2 in shared_resources.config['prediction_levels'])]
-        print(prediction_levels)
         full_encoded_question = [encoded_question[k] for k in prediction_levels]
         full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
         full_encoded_question = tf.concat(full_encoded_question, 2)
