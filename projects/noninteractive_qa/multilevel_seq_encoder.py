@@ -106,7 +106,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
-    governor_logits += (segm_probs - 1.0) * 10  # mask non segment ends
+    governor_logits += (segm_probs - 1.0) * 1e6  # mask non segment ends
     # frame_probs = tf.Print(frame_probs, [frame_probs], message='frame_probs', summarize=10)
     governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
     tf.identity(governor_probs, name='governor_probs')
