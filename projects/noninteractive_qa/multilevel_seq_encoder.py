@@ -59,17 +59,17 @@ def intra_segm_sum_fast(inputs, segm_probs, length):
     revcum_log_keep = tf.cumsum(log_keep, 1, True)
 
     # [B, L, L]
-    contributions_fw = tf.transpose(cum_log_keep, [0, 2, 1]) - cum_log_keep
-    contributions_bw = tf.transpose(revcum_log_keep, [0, 2, 1]) - revcum_log_keep
-    contributions = tf.exp(tf.minimum(contributions_fw, contributions_bw))
+    contributions_fw = cum_log_keep - tf.transpose(cum_log_keep, [0, 2, 1])
+    contributions_bw = revcum_log_keep - tf.transpose(revcum_log_keep, [0, 2, 1])
+    contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -100.0))
 
-    contributions = tf.Print(contributions, [contributions], summarize=100)
+    # contributions = tf.Print(contributions, [contributions[0]], summarize=10)
+    # contributions = tf.Print(contributions, [segm_probs[0]], summarize=10)
 
     # [B, L, L] * [B, L, D] = [B, L, D]
     summ = tf.matmul(contributions, inputs)
 
     return summ, None
-
 
 
 class _SumReset(tf.nn.rnn_cell.RNNCell):
