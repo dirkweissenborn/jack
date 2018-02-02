@@ -102,7 +102,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     frame_probs = tf.cond(is_eval,
                           lambda: tf.round(tf.sigmoid(frame_end_logits)),
                           lambda: gumbel_sigmoid(frame_end_logits))
-    frame_probs *= tf.stop_gradient(segm_probs)
+    frame_probs *= segm_probs
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
@@ -121,19 +121,18 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
-    potentials *= tf.stop_gradient(segm_probs)  # put zero probability on non segment ends
-    with tf.device('/cpu:0'):
-        address_probs = None
-        original_potentials = potentials
-        for i in range(num_iterations):
-            row_sum = tf.maximum(intra_segm_sum(potentials, segm_probs, length), potentials) + 1e-8
-            column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
-            weights = potentials * potentials / column_sum / row_sum
-            row_weight_sum = tf.maximum(intra_segm_sum(weights, segm_probs, length), potentials) + 1e-8
-            column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
-            address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
-            if i < num_iterations - 1:
-                potentials = original_potentials * address_probs
+    potentials *= segm_probs  # put zero probability on non segment ends
+    address_probs = None
+    original_potentials = potentials
+    for i in range(num_iterations):
+        row_sum = tf.maximum(intra_segm_sum(potentials, segm_probs, length), potentials) + 1e-8
+        column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
+        weights = potentials * potentials / column_sum / row_sum
+        row_weight_sum = tf.maximum(intra_segm_sum(weights, segm_probs, length), potentials) + 1e-8
+        column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
+        address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
+        if i < num_iterations - 1:
+            potentials = original_potentials * address_probs
 
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
