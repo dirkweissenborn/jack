@@ -32,10 +32,8 @@ def gumbel_logits(logits, temp=0.5):
 def horizontal_probs(logits, length, segm_probs, is_eval):
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
     exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
-    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length)[0],
-                             exps)  # probs should not be bigger than 1
-    # exps = tf.Print(exps, [exps], message='exp', summarize=10)
-    # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
+    # probs should not be bigger than 1
+    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length)[0], exps)
     probs = exps / (summed_exps + 1e-8)
 
     return probs
@@ -53,18 +51,24 @@ def intra_segm_sum(inputs, segm_probs, length):
 
 
 def intra_segm_sum_fast(inputs, segm_probs, length):
-    log_keep = tf.log((1.0 + 1e-8) - segm_probs)
+    log_keep = tf.log(tf.maximum(tf.minimum(1.0 - segm_probs, 1.0), 1e-8))
+    mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+    log_keep *= mask
     # [B, L, 1]
-    cum_log_keep = tf.cumsum(log_keep, 1, reverse=True)
-    revcum_log_keep = tf.cumsum(log_keep, 1, True)
+    revcum_log_keep = tf.cumsum(log_keep, 1, reverse=True)
+    cum_log_keep = tf.cumsum(log_keep, 1, exclusive=True)
 
     # [B, L, L]
     contributions_fw = cum_log_keep - tf.transpose(cum_log_keep, [0, 2, 1])
     contributions_bw = revcum_log_keep - tf.transpose(revcum_log_keep, [0, 2, 1])
     contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -20.0))
+    contributions *= mask
+    contributions *= tf.reshape(mask, [-1, 1, tf.shape(mask)[1]])
 
-    # contributions = tf.Print(contributions, [contributions[0]], summarize=10)
-    # contributions = tf.Print(contributions, [segm_probs[0]], summarize=10)
+    # contributions = tf.Print(contributions, [contributions_fw[0]], 'fw', summarize=10)
+    # contributions = tf.Print(contributions, [contributions_bw[0]], 'bw', summarize=10)
+    # contributions = tf.Print(contributions, [revcum_log_keep[0]], 'cum_log_keep', summarize=10)
+    # contributions = tf.Print(contributions, [log_keep[0]], 'log_keep', summarize=1000)
 
     # [B, L, L] * [B, L, D] = [B, L, D]
     summ = tf.matmul(contributions, inputs)
