@@ -37,7 +37,6 @@ def horizontal_probs(logits, length, segm_probs, is_eval):
     # exps = tf.Print(exps, [exps], message='exp', summarize=10)
     # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
     probs = exps / (summed_exps + 1e-8)
-    probs = tf.Print(probs, [probs, exps, summed_exps])
 
     return probs
 
