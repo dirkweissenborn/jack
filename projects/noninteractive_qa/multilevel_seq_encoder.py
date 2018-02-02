@@ -32,7 +32,7 @@ def gumbel_logits(logits, temp=0.5):
 def horizontal_probs(logits, length, segm_probs, is_eval):
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
     exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
-    summed_exps = tf.maximum(intra_segm_sum(exps, segm_probs, length), exps)  # probs should not be bigger than 1
+    summed_exps = tf.maximum(intra_segm_sum(exps, segm_probs, length)[0], exps)  # probs should not be bigger than 1
     # exps = tf.Print(exps, [exps], message='exp', summarize=10)
     # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
     probs = exps / (summed_exps + 1e-8)
@@ -45,9 +45,10 @@ def intra_segm_sum(inputs, segm_probs, length):
     sum_fw, end_state = tf.nn.dynamic_rnn(_SumReset(repr_dim), (inputs, keep), length, dtype=tf.float32)
     sum_fw_rev = tf.reverse_sequence(sum_fw, length, 1)
     segm_rev = tf.reverse_sequence(segm_probs, length, 1)
-    summ = tf.nn.dynamic_rnn(PropagationCell(repr_dim), (sum_fw_rev, segm_rev), length, initial_state=end_state)[0]
+    summ, rest = tf.nn.dynamic_rnn(PropagationCell(repr_dim), (sum_fw_rev, segm_rev), length, initial_state=end_state)
     summ = tf.reverse_sequence(summ, length, 1)
-    return summ
+    return summ, rest
+
 
 
 class _SumReset(tf.nn.rnn_cell.RNNCell):
@@ -102,7 +103,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     frame_probs = tf.cond(is_eval,
                           lambda: tf.round(tf.sigmoid(frame_end_logits)),
                           lambda: gumbel_sigmoid(frame_end_logits))
-    frame_probs *= segm_probs
+    frame_probs *= tf.stop_gradient(segm_probs)
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
@@ -111,7 +112,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
     tf.identity(governor_probs, name='governor_probs')
 
-    govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)
+    govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)[0]
 
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
@@ -121,14 +122,14 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
-    potentials *= segm_probs  # put zero probability on non segment ends
+    potentials *= tf.stop_gradient(segm_probs)  # put zero probability on non segment ends
     address_probs = None
     original_potentials = potentials
     for i in range(num_iterations):
-        row_sum = tf.maximum(intra_segm_sum(potentials, frame_probs, length), potentials) + 1e-8
+        row_sum = tf.maximum(intra_segm_sum(potentials, frame_probs, length)[0], potentials) + 1e-8
         column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
         weights = potentials * potentials / column_sum / row_sum
-        row_weight_sum = tf.maximum(intra_segm_sum(weights, frame_probs, length), potentials) + 1e-8
+        row_weight_sum = tf.maximum(intra_segm_sum(weights, frame_probs, length)[0], potentials) + 1e-8
         column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
         address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
         if i < num_iterations - 1:
@@ -137,7 +138,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
-    memory = intra_segm_sum(memory, frame_probs, length)
+    memory = intra_segm_sum(memory, frame_probs, length)[0]
 
     return memory, address_probs, address_logits
 
