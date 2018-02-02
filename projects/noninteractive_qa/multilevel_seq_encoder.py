@@ -37,6 +37,7 @@ def horizontal_probs(logits, length, segm_probs, is_eval):
     # exps = tf.Print(exps, [exps], message='exp', summarize=10)
     # summed_exps = tf.Print(exps, [summed_exps], message='sum', summarize=10)
     probs = exps / (summed_exps + 1e-8)
+    probs = tf.Print(probs, [probs, exps, summed_exps])
 
     return probs
 
@@ -61,7 +62,7 @@ def intra_segm_sum_fast(inputs, segm_probs, length):
     # [B, L, L]
     contributions_fw = cum_log_keep - tf.transpose(cum_log_keep, [0, 2, 1])
     contributions_bw = revcum_log_keep - tf.transpose(revcum_log_keep, [0, 2, 1])
-    contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -100.0))
+    contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -20.0))
 
     # contributions = tf.Print(contributions, [contributions[0]], summarize=10)
     # contributions = tf.Print(contributions, [segm_probs[0]], summarize=10)

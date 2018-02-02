@@ -123,7 +123,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
-        step = tf.train.get_global_step()
+        step = tf.train.get_global_step() or tf.constant(2001, tf.int32)
         def encoding(inputs, length, reuse=False):
             with tf.variable_scope("encoding", reuse=reuse):
                 with tf.variable_scope("controller"):
