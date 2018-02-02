@@ -124,6 +124,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     potentials *= tf.stop_gradient(segm_probs)  # put zero probability on non segment ends
     with tf.device('/cpu:0'):
         address_probs = None
+        original_potentials = potentials
         for i in range(num_iterations):
             row_sum = tf.maximum(intra_segm_sum(potentials, segm_probs, length), potentials) + 1e-8
             column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
@@ -132,7 +133,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
             column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
             address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
             if i < num_iterations - 1:
-                potentials *= address_probs
+                potentials = original_potentials * address_probs
 
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
