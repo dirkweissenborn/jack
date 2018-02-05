@@ -33,7 +33,7 @@ def horizontal_probs(logits, length, segm_probs, is_eval):
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
     exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
     # probs should not be bigger than 1
-    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length)[0], exps)
+    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length), exps)
     probs = exps / (summed_exps + 1e-8)
 
     return probs
@@ -47,10 +47,10 @@ def intra_segm_sum(inputs, segm_probs, length):
     segm_rev = tf.reverse_sequence(segm_probs, length, 1)
     summ, rest = tf.nn.dynamic_rnn(PropagationCell(repr_dim), (sum_fw_rev, segm_rev), length, initial_state=end_state)
     summ = tf.reverse_sequence(summ, length, 1)
-    return summ, rest
+    return summ
 
 
-def intra_segm_sum_fast(inputs, segm_probs, length):
+def intra_segm_contributions(segm_probs, length):
     log_keep = tf.log(tf.maximum(tf.minimum(1.0 - segm_probs, 1.0), 1e-8))
     mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
     log_keep *= mask
@@ -64,16 +64,13 @@ def intra_segm_sum_fast(inputs, segm_probs, length):
     contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -20.0))
     contributions *= mask
     contributions *= tf.reshape(mask, [-1, 1, tf.shape(mask)[1]])
+    return contributions
 
-    # contributions = tf.Print(contributions, [contributions_fw[0]], 'fw', summarize=10)
-    # contributions = tf.Print(contributions, [contributions_bw[0]], 'bw', summarize=10)
-    # contributions = tf.Print(contributions, [revcum_log_keep[0]], 'cum_log_keep', summarize=10)
-    # contributions = tf.Print(contributions, [log_keep[0]], 'log_keep', summarize=1000)
 
+def intra_segm_sum_fast(inputs, segm_probs, length):
     # [B, L, L] * [B, L, D] = [B, L, D]
-    summ = tf.matmul(contributions, inputs)
-
-    return summ, None
+    summ = tf.matmul(intra_segm_contributions(segm_probs, length), inputs)
+    return summ
 
 
 class _SumReset(tf.nn.rnn_cell.RNNCell):
@@ -99,6 +96,33 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
         controller_config['encoder'], {'text': sequence}, {'text': length}, {},
         repr_dim, 0.0, is_eval=is_eval)[0]['text']
     return controller_out
+
+
+def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
+    segm_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
+    segm_ends = tf.cond(is_eval,
+                        lambda: tf.round(tf.sigmoid(segm_logits)),
+                        lambda: gumbel_sigmoid(segm_logits))
+
+    tf.identity(tf.nn.sigmoid(segm_logits), name='segm_probs')
+
+    seq_as_start, seq_as_end, seq_transformed = tf.split(
+        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 1)
+
+    segm_contributions = intra_segm_contributions(segm_ends, length)
+
+    bow_sum = tf.matmul(segm_contributions, seq_transformed)
+    bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
+    bow_mean = bow_sum / bow_num
+
+    segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
+    seq_as_start *= segm_starts
+    seq_as_end *= segm_ends
+
+    segment_reps = bow_mean + tf.matmul(segm_contributions, seq_as_end) + tf.matmul(segm_contributions, seq_as_start)
+
+    return segment_reps, segm_ends, segm_logits
+
 
 
 def segmentation_encoder(sequence, length, repr_dim, controller_out, is_eval):
@@ -137,7 +161,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
     tf.identity(governor_probs, name='governor_probs')
 
-    govenors = intra_segm_sum_fast(governor_probs * segms, frame_probs, length)[0]
+    govenors = intra_segm_sum_fast(governor_probs * segms, frame_probs, length)
 
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
@@ -151,10 +175,10 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     address_probs = None
     original_potentials = potentials
     for i in range(num_iterations):
-        row_sum = tf.maximum(intra_segm_sum_fast(potentials, frame_probs, length)[0], potentials) + 1e-8
+        row_sum = tf.maximum(intra_segm_sum_fast(potentials, frame_probs, length), potentials) + 1e-8
         column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
         weights = potentials * potentials / column_sum / row_sum
-        row_weight_sum = tf.maximum(intra_segm_sum_fast(weights, frame_probs, length)[0], potentials) + 1e-8
+        row_weight_sum = tf.maximum(intra_segm_sum_fast(weights, frame_probs, length), potentials) + 1e-8
         column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
         address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
         if i < num_iterations - 1:
@@ -163,7 +187,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
-    memory = intra_segm_sum_fast(memory, frame_probs, length)[0]
+    memory = intra_segm_sum_fast(memory, frame_probs, length)
 
     return memory, address_probs, address_logits
 
@@ -205,4 +229,4 @@ class SegmentationCell(tf.nn.rnn_cell.RNNCell):
 
     @property
     def state_size(self):
-        return self._cell.state_size
+        return self._repr_dim, self._repr_dim, 1, 1

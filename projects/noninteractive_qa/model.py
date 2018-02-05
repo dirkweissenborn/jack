@@ -10,8 +10,8 @@ from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
-from projects.noninteractive_qa.multilevel_seq_encoder import segmentation_encoder, governor_detection_encoder, \
-    assoc_memory_encoder
+from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
+    assoc_memory_encoder, bow_segm_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -135,10 +135,10 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 representations = {"ctrl": controller_out}
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
-                    segms, segm_probs, segm_logits = segmentation_encoder(
+                    segms, segm_probs, segm_logits = bow_segm_encoder(
                         inputs, length, repr_dim, controller_out, tensors.is_eval)
                     representations['segm'] = segms
-                    segms, segm_probs = tf.cond(step > 1000,
+                    segms, segm_probs = tf.cond(step > 2000,
                                                 lambda: (segms, segm_probs),
                                                 lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
                     governor, frame_probs, boundary_logits, _, _ = governor_detection_encoder(
