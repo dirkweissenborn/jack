@@ -107,7 +107,7 @@ def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
     tf.identity(tf.nn.sigmoid(segm_logits), name='segm_probs')
 
     seq_as_start, seq_as_end, seq_transformed = tf.split(
-        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 1)
+        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
 
     segm_contributions = intra_segm_contributions(segm_ends, length)
 
@@ -122,7 +122,6 @@ def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
     segment_reps = bow_mean + tf.matmul(segm_contributions, seq_as_end) + tf.matmul(segm_contributions, seq_as_start)
 
     return segment_reps, segm_ends, segm_logits
-
 
 
 def segmentation_encoder(sequence, length, repr_dim, controller_out, is_eval):
