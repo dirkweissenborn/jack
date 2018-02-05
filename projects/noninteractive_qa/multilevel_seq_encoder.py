@@ -159,7 +159,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
     exps *= segm_probs
     # probs should not be bigger than 1
-    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length), exps)
+    summed_exps = tf.maximum(intra_segm_sum_fast(exps, frame_probs, length), exps)
     governor_probs = exps / (summed_exps + 1e-8)
     tf.identity(governor_probs, name='governor_probs')
 
