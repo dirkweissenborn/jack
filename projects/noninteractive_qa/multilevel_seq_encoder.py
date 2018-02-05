@@ -168,10 +168,11 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
 
 
 def assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, segm_probs, segms, is_eval,
-                         num_iterations=3):
+                         num_iterations=1):
     inputs = tf.concat([governor, segms], 2)
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
+    address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
     potentials *= segm_probs  # put zero probability on non segment ends
     original_potentials = potentials
@@ -197,6 +198,29 @@ def assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, seg
                       lambda: tf.random_uniform([], 0, num_iterations - 1, tf.int32))
         r = tf.range(0, end)
         address_probs = tf.cond(end > 0, lambda: tf.scan(iteration, r, address_probs)[-1], lambda: address_probs)
+
+    tf.identity(address_probs, name='address_probs')
+    memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
+    memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
+    memory = tf.matmul(frame_contributions, memory)
+
+    return memory, address_probs, address_logits
+
+
+def simple_assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, segm_probs, segms, is_eval):
+    inputs = tf.concat([governor, segms], 2)
+    address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
+                                     bias_initializer=tf.constant_initializer(0.0))
+    address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))
+    potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
+    potentials *= segm_probs  # put zero probability on non segment ends
+
+    frame_contributions = intra_segm_contributions(frame_probs, length)
+
+    row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials) + 1e-8
+    column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
+
+    address_probs = tf.minimum(potentials / row_sum, potentials / column_sum)
 
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
