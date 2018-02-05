@@ -173,11 +173,14 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     potentials *= segm_probs  # put zero probability on non segment ends
     address_probs = None
     original_potentials = potentials
+
+    frame_contributions = intra_segm_contributions(frame_probs, length)
+
     for i in range(num_iterations):
-        row_sum = tf.maximum(intra_segm_sum_fast(potentials, frame_probs, length), potentials) + 1e-8
+        row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials) + 1e-8
         column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
         weights = potentials * potentials / column_sum / row_sum
-        row_weight_sum = tf.maximum(intra_segm_sum_fast(weights, frame_probs, length), potentials) + 1e-8
+        row_weight_sum = tf.maximum(tf.matmul(frame_contributions, weights), potentials) + 1e-8
         column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
         address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
         if i < num_iterations - 1:
@@ -186,7 +189,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
-    memory = intra_segm_sum_fast(memory, frame_probs, length)
+    memory = tf.matmul(frame_contributions, memory)
 
     return memory, address_probs, address_logits
 
