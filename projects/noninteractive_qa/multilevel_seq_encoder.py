@@ -113,7 +113,7 @@ def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
 
     bow_sum = tf.matmul(segm_contributions, seq_transformed)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
-    bow_mean = bow_sum / bow_num
+    bow_mean = bow_sum / (bow_num + 1e-6)
 
     segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
     seq_as_start *= segm_starts
