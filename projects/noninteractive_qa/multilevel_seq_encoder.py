@@ -154,7 +154,7 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     frame_probs *= segm_probs
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
-    governor_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
+    governor_logits = tf.layers.dense(tf.layers.dense(segms, repr_dim, tf.nn.relu), 1)
     governor_logits += (segm_probs - 1.0) * 1e6  # mask non segment ends
     # frame_probs = tf.Print(frame_probs, [frame_probs], message='frame_probs', summarize=10)
     governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
@@ -165,8 +165,9 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
 
-def assoc_memory_encoder(length, repr_dim, num_slots, inputs, frame_probs, segm_probs, segms, is_eval,
+def assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, segm_probs, segms, is_eval,
                          num_iterations=1):
+    inputs = tf.concat([governor, segms], 2)
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))

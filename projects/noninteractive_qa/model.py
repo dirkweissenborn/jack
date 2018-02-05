@@ -145,9 +145,8 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         length, repr_dim, controller_out, segm_probs, segms, tensors.is_eval)
                     representations['governor'] = governor
                     if shared_resources.config.get('num_slots', 0):
-                        state = tf.concat([controller_out, governor, segms], 2)
                         memory, _, _ = assoc_memory_encoder(
-                            length, repr_dim, shared_resources.config['num_slots'], state, frame_probs,
+                            length, repr_dim, shared_resources.config['num_slots'], governor, frame_probs,
                             segm_probs, segms, tensors.is_eval)
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
                             representations['assoc_' + str(i)] = m
