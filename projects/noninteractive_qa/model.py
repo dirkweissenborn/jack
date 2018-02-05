@@ -138,9 +138,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     segms, segm_probs, segm_logits = bow_segm_encoder(
                         inputs, length, repr_dim, controller_out, tensors.is_eval)
                     representations['segm'] = segms
-                    segms, segm_probs = tf.cond(step > 2000,
-                                                lambda: (segms, segm_probs),
-                                                lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
+                    # segms, segm_probs = tf.cond(step > 2000,
+                    #                            lambda: (segms, segm_probs),
+                    #                            lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
                     governor, frame_probs, boundary_logits, _, _ = governor_detection_encoder(
                         length, repr_dim, controller_out, segm_probs, segms, tensors.is_eval)
                     representations['governor'] = governor

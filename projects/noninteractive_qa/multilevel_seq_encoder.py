@@ -155,37 +155,48 @@ def governor_detection_encoder(length, repr_dim, controller_out, segm_probs, seg
     tf.identity(tf.sigmoid(frame_end_logits), name='frame_probs')
 
     governor_logits = tf.layers.dense(tf.layers.dense(segms, repr_dim, tf.nn.relu), 1)
-    governor_logits += (segm_probs - 1.0) * 1e6  # mask non segment ends
-    # frame_probs = tf.Print(frame_probs, [frame_probs], message='frame_probs', summarize=10)
-    governor_probs = horizontal_probs(governor_logits, length, frame_probs, is_eval)
+    governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
+    exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
+    exps *= segm_probs
+    # probs should not be bigger than 1
+    summed_exps = tf.maximum(intra_segm_sum_fast(exps, segm_probs, length), exps)
+    governor_probs = exps / (summed_exps + 1e-8)
     tf.identity(governor_probs, name='governor_probs')
 
     govenors = intra_segm_sum_fast(governor_probs * segms, frame_probs, length)
-
     return govenors, frame_probs, frame_end_logits, governor_probs, governor_logits
 
 
 def assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, segm_probs, segms, is_eval,
-                         num_iterations=1):
+                         num_iterations=3):
     inputs = tf.concat([governor, segms], 2)
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
     potentials *= segm_probs  # put zero probability on non segment ends
-    address_probs = None
     original_potentials = potentials
 
     frame_contributions = intra_segm_contributions(frame_probs, length)
 
-    for i in range(num_iterations):
+    def iteration(address_probs, x):
+        potentials = original_potentials
+        if address_probs is not None:
+            potentials *= address_probs
         row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials) + 1e-8
         column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
         weights = potentials * potentials / column_sum / row_sum
-        row_weight_sum = tf.maximum(tf.matmul(frame_contributions, weights), potentials) + 1e-8
+        row_weight_sum = tf.matmul(frame_contributions, weights) + 1e-8
         column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
         address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
-        if i < num_iterations - 1:
-            potentials = original_potentials * address_probs
+        return address_probs
+
+    address_probs = iteration(None, None)
+
+    if num_iterations > 1:
+        end = tf.cond(is_eval, lambda: num_iterations - 1,
+                      lambda: tf.random_uniform([], 0, num_iterations - 1, tf.int32))
+        r = tf.range(0, end)
+        address_probs = tf.cond(end > 0, lambda: tf.scan(iteration, r, address_probs)[-1], lambda: address_probs)
 
     tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
