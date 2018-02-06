@@ -177,8 +177,8 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         for k2 in shared_resources.config['prediction_levels']}
         full_encoded_question = [encoded_question[k] for k in prediction_levels]
         full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
-        full_encoded_question = tf.concat(full_encoded_question, 2)
-        question_state = compute_question_state(full_encoded_question, tensors.question_length)
+        question_state = compute_question_state(
+            tf.concat([encoded_question['word'], encoded_question['ctrl']], 2), tensors.question_length)
         question_state = tf.gather(question_state, tensors.support2question)
         question_state = tf.split(question_state, full_encoded_question_splits, 1)
         for q, k in zip(question_state, prediction_levels):
