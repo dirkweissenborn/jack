@@ -39,6 +39,14 @@ def answer_layer(encoded_question, question_length, encoded_support, support_len
         raise ValueError("Unknown answer layer type: %s" % module)
 
 
+def compute_question_weights(encoded_question, question_length):
+    attention_scores = tf.layers.dense(encoded_question, 1, name="question_attention")
+    q_mask = misc.mask_for_lengths(question_length)
+    attention_scores = attention_scores + tf.expand_dims(q_mask, 2)
+    question_attention_weights = tf.nn.softmax(attention_scores, 1, name="question_attention_weights")
+    return question_attention_weights
+
+
 def compute_question_state(encoded_question, question_length):
     attention_scores = tf.layers.dense(encoded_question, 1, name="question_attention")
     q_mask = misc.mask_for_lengths(question_length)

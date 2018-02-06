@@ -4,7 +4,8 @@ This file contains FastQA specific modules and ports
 
 from jack.core import *
 from jack.readers.extractive_qa.tensorflow.abstract_model import AbstractXQAModelModule
-from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_state, compute_spans
+from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_state, compute_spans, \
+    compute_question_weights
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
@@ -177,8 +178,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         for k2 in shared_resources.config['prediction_levels']}
         full_encoded_question = [encoded_question[k] for k in prediction_levels]
         full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
-        question_state = compute_question_state(
+        question_attention_weights = compute_question_weights(
             tf.concat([encoded_question['word'], encoded_question['ctrl']], 2), tensors.question_length)
+        question_state = tf.reduce_sum(question_attention_weights * tf.concat(full_encoded_question, 2), 1)
         question_state = tf.gather(question_state, tensors.support2question)
         question_state = tf.split(question_state, full_encoded_question_splits, 1)
         for q, k in zip(question_state, prediction_levels):
