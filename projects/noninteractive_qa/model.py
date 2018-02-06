@@ -11,7 +11,7 @@ from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
-    bow_segm_encoder, simple_assoc_memory_encoder
+    bow_segm_encoder, assoc_memory_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -145,7 +145,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         length, repr_dim, controller_out, segm_probs, segms, tensors.is_eval)
                     representations['governor'] = governor
                     if shared_resources.config.get('num_slots', 0):
-                        memory, _, _ = simple_assoc_memory_encoder(
+                        memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], governor, frame_probs,
                             segm_probs, segms, tensors.is_eval)
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
