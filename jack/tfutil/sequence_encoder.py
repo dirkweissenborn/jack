@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, conv_width=3,
-            dilations=None, reuse=False, residual=False, attn_type=None, num_attn_heads=1, scaled=False,
+            dilations=None, reuse=None, residual=False, attn_type=None, num_attn_heads=1, scaled=False,
             activation=None, with_sentinel=False, with_projection=False, name='encoder', **kwargs):
     if num_layers == 1:
         if module == 'lstm':
@@ -72,7 +72,7 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, con
 
 
 # RNN Encoders
-def _bi_rnn(size, fused_rnn, sequence, seq_length, name, reuse=False, with_projection=False):
+def _bi_rnn(size, fused_rnn, sequence, seq_length, name, reuse=None, with_projection=False):
     with tf.variable_scope(name, reuse=reuse):
         output = rnn.fused_birnn(fused_rnn, sequence, seq_length, dtype=tf.float32, scope='rnn')[0]
         output = tf.concat(output, 2)
@@ -82,16 +82,16 @@ def _bi_rnn(size, fused_rnn, sequence, seq_length, name, reuse=False, with_proje
     return output
 
 
-def bi_lstm(size, sequence, seq_length, name='bilstm', reuse=False, with_projection=False):
+def bi_lstm(size, sequence, seq_length, name='bilstm', reuse=None, with_projection=False):
     return _bi_rnn(size, tf.contrib.rnn.LSTMBlockFusedCell(size), sequence, seq_length, name, reuse, with_projection)
 
 
-def bi_rnn(size, rnn_cell, sequence, seq_length, name='bi_rnn', reuse=False, with_projection=False):
+def bi_rnn(size, rnn_cell, sequence, seq_length, name='bi_rnn', reuse=None, with_projection=False):
     fused_rnn = tf.contrib.rnn.FusedRNNCellAdaptor(rnn_cell, use_dynamic_rnn=True)
     return _bi_rnn(size, fused_rnn, sequence, seq_length, name, reuse, with_projection)
 
 
-def bi_sru(size, sequence, seq_length, with_residual=True, name='bi_sru', reuse=False, with_projection=False):
+def bi_sru(size, sequence, seq_length, with_residual=True, name='bi_sru', reuse=None, with_projection=False):
     """Simple Recurrent Unit, very fast.  https://openreview.net/pdf?id=rJBiunlAW."""
     fused_rnn = rnn.SRUFusedRNN(size, with_residual)
     return _bi_rnn(size, fused_rnn, sequence, seq_length, name, reuse, with_projection)
@@ -99,7 +99,7 @@ def bi_sru(size, sequence, seq_length, with_residual=True, name='bi_sru', reuse=
 
 # Convolution Encoders
 
-def convnet(out_size, inputs, num_layers, width=3, activation=tf.nn.relu, name='convnet', reuse=False):
+def convnet(out_size, inputs, num_layers, width=3, activation=tf.nn.relu, name='convnet', reuse=None):
     with tf.variable_scope(name, reuse=reuse):
         # dim reduction
         output = inputs
@@ -138,7 +138,7 @@ def _convolutional_glu_block(inputs, out_channels, dilation=1, width=3, name='di
     return output
 
 
-def gated_linear_dilated_residual_network(out_size, inputs, dilations, width=3, name='gldr_network', reuse=False):
+def gated_linear_dilated_residual_network(out_size, inputs, dilations, width=3, name='gldr_network', reuse=None):
     """Follows https://openreview.net/pdf?id=HJRV1ZZAW.
 
     Args:
@@ -157,7 +157,7 @@ def gated_linear_dilated_residual_network(out_size, inputs, dilations, width=3, 
     return output
 
 
-def gated_linear_convnet(out_size, inputs, num_layers, width=3, name='gated_linear_convnet', reuse=False):
+def gated_linear_convnet(out_size, inputs, num_layers, width=3, name='gated_linear_convnet', reuse=None):
     """Follows https://openreview.net/pdf?id=HJRV1ZZAW.
 
     Args:
@@ -178,7 +178,7 @@ def gated_linear_convnet(out_size, inputs, num_layers, width=3, name='gated_line
 
 # Self attention layers
 def self_attention(inputs, lengths, attn_type='bilinear', scaled=True, repr_dim=None, activation=None,
-                   with_sentinel=False, name='self_attention', reuse=False):
+                   with_sentinel=False, name='self_attention', reuse=None):
     with tf.variable_scope(name, reuse):
         if attn_type == 'bilinear':
             attn_states = attention.bilinear_attention(inputs, inputs, lengths, scaled, with_sentinel)[2]
