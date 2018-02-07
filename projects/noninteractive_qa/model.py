@@ -416,16 +416,18 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                         prev_segm_probs = segm_probs
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
-                        segm_probs = tf.cond(step >= 200 * i,
+                        segm_probs = tf.cond(step >= 1000 * i,
                                              lambda: segm_probs,
                                              lambda: tf.stop_gradient(segm_probs))
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
 
                         prev_segm_probs = prev_segm_probs if i > 0 else tf.ones_like(segm_probs)
-                        memory, _, _ = assoc_memory_encoder(
+                        memory, address_probs, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], segm_probs, prev_segm_probs, segms,
                             ctrl, tensors.is_eval)
                         representations.extend(tf.split(memory, shared_resources.config['num_slots'], 2))
+
+                        tf.identity(address_probs, name='address_probs' + str(i))
 
                         segms = tf.layers.dense(tf.layers.dense(memory, 2 * repr_dim, tf.nn.relu), repr_dim, tf.nn.relu)
 
