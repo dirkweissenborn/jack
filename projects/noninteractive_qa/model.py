@@ -421,7 +421,7 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                                              lambda: tf.stop_gradient(segm_probs))
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
 
-                        prev_segm_probs = prev_segm_probs or tf.ones_like(segm_probs)
+                        prev_segm_probs = prev_segm_probs if i > 0 else tf.ones_like(segm_probs)
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], segm_probs, prev_segm_probs, segms,
                             ctrl, tensors.is_eval)
@@ -449,7 +449,8 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
         question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state, shared_resources.config['num_layers'] + 2, 1)
+        question_state = tf.split(question_state,
+                                  shared_resources.config['num_layers'] * shared_resources.config['num_slots'] + 2, 1)
         for i, (q, s) in enumerate(zip(question_state, encoded_support)):
             with tf.variable_scope('prediction' + str(i)) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")

@@ -1,0 +1,12 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 128
+dropout: 0.2
+epochs: 15
+
+reader: 'hierarchical_assocmem_qa_reader'
+name: 'hierarchical_assocmem_qa_reader'
+
+num_layers: 3
+num_slots: 5
