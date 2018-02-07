@@ -153,9 +153,8 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
     return edge_probs, edge_logits
 
 
-def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, left_segms, right_segms, is_eval):
-    governor_logits = tf.layers.dense(tf.layers.dense(tf.concat([segms, left_segms, right_segms], 2),
-                                                      repr_dim, tf.nn.relu), 1)
+def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, inputs, is_eval):
+    governor_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), 1)
     governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
     exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
     exps *= segm_probs
@@ -168,9 +167,8 @@ def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms,
     return govenors, governor_probs, governor_logits
 
 
-def assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_probs, segm_probs, segms,
-                         left_segms, right_segms, is_eval, num_iterations=1):
-    inputs = tf.concat([governor, segms, left_segms, right_segms], 2)
+def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms,
+                         inputs, is_eval, num_iterations=1):
     address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))

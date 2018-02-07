@@ -145,8 +145,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
-                    segms = bow_segm_encoder(
-                        inputs, length, repr_dim, segm_probs, tensors.is_eval)
+                    segms = bow_segm_encoder(inputs, length, repr_dim, segm_probs, tensors.is_eval)
                     representations['segm'] = segms
 
                     left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
@@ -155,16 +154,20 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     left_segms = tf.matmul(left_segm_contribs, segms)
                     right_segms = tf.matmul(right_segm_contribs, segms)
 
+                    segm_ctrl = tf.nn.relu(segms + tf.layers.dense(
+                        tf.concat([left_segms, right_segms], 2), segms.get_shape()[-1].value))
+
                     # segms, segm_probs = tf.cond(step > 2000,
                     #                            lambda: (segms, segm_probs),
                     #                            lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
                     governor, _, _ = governor_detection_encoder(
-                        length, repr_dim, frame_probs, segm_probs, segms, left_segms, right_segms, tensors.is_eval)
+                        length, repr_dim, frame_probs, segm_probs, segms, segm_ctrl, tensors.is_eval)
                     representations['governor'] = governor
                     if shared_resources.config.get('num_slots', 0):
+                        inputs = tf.concat([segm_ctrl, governor], 2)
                         memory, _, _ = assoc_memory_encoder(
-                            length, repr_dim, shared_resources.config['num_slots'], governor, frame_probs,
-                            segm_probs, segms, left_segms, right_segms, tensors.is_eval)
+                            length, repr_dim, shared_resources.config['num_slots'], frame_probs,
+                            segm_probs, segms, inputs, tensors.is_eval)
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
                             representations['assoc_' + str(i)] = m
 
