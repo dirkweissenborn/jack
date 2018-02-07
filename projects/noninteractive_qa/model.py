@@ -13,7 +13,7 @@ from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.sequence_encoder import convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
-    bow_segm_encoder, assoc_memory_encoder, edge_detection_encoder, left_segm_sum_contributions, \
+    assoc_memory_encoder, edge_detection_encoder, left_segm_sum_contributions, \
     right_segm_sum_contributions, bow_start_end_segm_encoder
 
 
@@ -295,7 +295,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-                        segms = bow_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
+                        segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
                         representations.append(segms)
 
                         left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
