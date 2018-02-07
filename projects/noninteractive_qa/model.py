@@ -10,7 +10,7 @@ from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
-from jack.tfutil.sequence_encoder import convnet
+from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
     assoc_memory_encoder, edge_detection_encoder, left_segm_sum_contributions, \
@@ -288,7 +288,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
             with tf.variable_scope("encoding", reuse=reuse):
                 segm_probs = None
                 segms = inputs
-                ctrl = tf.nn.relu(convnet(repr_dim, inputs, 1, 5))
+                ctrl = gated_linear_convnet(repr_dim, inputs, 2, 5)
                 representations.append(ctrl)
                 for i in range(1, shared_resources.config['num_layers'] + 1):
                     with tf.variable_scope("layer" + str(i)):
