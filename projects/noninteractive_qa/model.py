@@ -288,8 +288,8 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
             with tf.variable_scope("encoding", reuse=reuse):
                 segm_probs = None
                 segms = inputs
-                ctrl = tf.nn.relu(convnet(repr_dim, inputs, 1) + inputs)
-                representations.append(segms)
+                ctrl = tf.nn.relu(convnet(repr_dim, inputs, 1, 5) + inputs)
+                representations.append(ctrl)
                 for i in range(1, shared_resources.config['num_layers'] + 1):
                     with tf.variable_scope("layer" + str(i)):
                         segm_probs, segm_logits = edge_detection_encoder(
