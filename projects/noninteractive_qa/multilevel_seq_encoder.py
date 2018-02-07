@@ -110,8 +110,7 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
 
 
 def bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
-    seq_as_start, seq_as_end, seq_transformed = tf.split(
-        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
+    seq_transformed = tf.layers.dense(sequence, repr_dim, tf.nn.relu)
 
     segm_contributions = intra_segm_sum_contributions(segm_ends, length)
 
