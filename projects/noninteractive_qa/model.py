@@ -145,7 +145,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
-                    segms, segm_probs, segm_logits = bow_segm_encoder(
+                    segms = bow_segm_encoder(
                         inputs, length, repr_dim, controller_out, tensors.is_eval)
                     representations['segm'] = segms
 

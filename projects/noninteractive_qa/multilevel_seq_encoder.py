@@ -109,14 +109,7 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
     return controller_out
 
 
-def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
-    segm_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
-    segm_ends = tf.cond(is_eval,
-                        lambda: tf.round(tf.sigmoid(segm_logits)),
-                        lambda: gumbel_sigmoid(segm_logits))
-
-    tf.identity(tf.nn.sigmoid(segm_logits), name='segm_probs')
-
+def bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
     seq_as_start, seq_as_end, seq_transformed = tf.split(
         tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
 
@@ -132,28 +125,21 @@ def bow_segm_encoder(sequence, length, repr_dim, controller_out, is_eval):
 
     segment_reps = bow_mean + tf.matmul(segm_contributions, seq_as_end) + tf.matmul(segm_contributions, seq_as_start)
 
-    return segment_reps, segm_ends, segm_logits
+    return segment_reps
 
 
-def segmentation_encoder(sequence, length, repr_dim, controller_out, is_eval):
-    segm_logits = tf.layers.dense(tf.layers.dense(controller_out, repr_dim, tf.nn.relu), 1)
-    segm_probs = tf.cond(is_eval,
-                         lambda: tf.round(tf.sigmoid(segm_logits)),
-                         lambda: gumbel_sigmoid(segm_logits))
-
-    tf.identity(tf.nn.sigmoid(segm_logits), name='segm_probs')
-
+def segmentation_encoder(sequence, length, repr_dim, segm_ends, is_eval):
     memory_rnn = SegmentationCell(repr_dim)
-    forward_memories, final_memory = tf.nn.dynamic_rnn(memory_rnn, (sequence, segm_probs), length, dtype=tf.float32)
+    forward_memories, final_memory = tf.nn.dynamic_rnn(memory_rnn, (sequence, segm_ends), length, dtype=tf.float32)
 
     back_cell = PropagationCell(repr_dim)
     memories_rev = tf.reverse_sequence(forward_memories, length, 1)
-    segm_rev = tf.reverse_sequence(segm_probs, length, 1)
+    segm_rev = tf.reverse_sequence(segm_ends, length, 1)
     back_memories = tf.nn.dynamic_rnn(back_cell, (memories_rev, segm_rev), length, dtype=tf.float32)[0]
 
     segment_reps = tf.reverse_sequence(back_memories, length, 1)
 
-    return segment_reps, segm_probs, segm_logits
+    return segment_reps
 
 
 def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
