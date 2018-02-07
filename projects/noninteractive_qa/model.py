@@ -289,8 +289,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 segm_probs = None
                 segms = inputs
                 ctrl = gated_linear_convnet(repr_dim, inputs, 2, 5)
+                representations.append(inputs)
                 representations.append(ctrl)
-                for i in range(1, shared_resources.config['num_layers'] + 1):
+                for i in range(shared_resources.config['num_layers']):
                     with tf.variable_scope("layer" + str(i)):
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
@@ -318,7 +319,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
         question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state, shared_resources.config['num_layers'] + 1, 1)
+        question_state = tf.split(question_state, shared_resources.config['num_layers'] + 2, 1)
         for i, (q, s) in enumerate(zip(question_state, encoded_support)):
             with tf.variable_scope('prediction' + str(i)) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
