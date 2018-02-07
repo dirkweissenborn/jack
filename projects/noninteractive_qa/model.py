@@ -283,6 +283,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
+        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
         def encoding(inputs, length, reuse=False):
             representations = list()
             with tf.variable_scope("encoding", reuse=reuse):
@@ -295,6 +296,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                     with tf.variable_scope("layer" + str(i)):
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
+                        segm_probs = tf.cond(step >= 1000 * i,
+                                             lambda: segm_probs,
+                                             lambda: tf.stop_gradient(segm_probs))
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                         segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
                         representations.append(segms)
