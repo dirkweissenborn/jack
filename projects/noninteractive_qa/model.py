@@ -12,7 +12,8 @@ from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
-    bow_segm_encoder, assoc_memory_encoder
+    bow_segm_encoder, assoc_memory_encoder, edge_detection_encoder, left_segm_sum_contributions, \
+    right_segm_sum_contributions
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -134,25 +135,40 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
                 representations = {"ctrl": controller_out}
+
+                segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval)
+                frame_probs, frame_logits = edge_detection_encoder(
+                    controller_out, repr_dim, tensors.is_eval, mask=segm_probs)
+
+                tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+                tf.identity(tf.sigmoid(frame_logits), name='frame_probs')
+
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
                     segms, segm_probs, segm_logits = bow_segm_encoder(
                         inputs, length, repr_dim, controller_out, tensors.is_eval)
                     representations['segm'] = segms
+
+                    left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
+                    right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
+
+                    left_segms = tf.matmul(left_segm_contribs, segms)
+                    right_segms = tf.matmul(right_segm_contribs, segms)
+
                     # segms, segm_probs = tf.cond(step > 2000,
                     #                            lambda: (segms, segm_probs),
                     #                            lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
-                    governor, frame_probs, boundary_logits, _, _ = governor_detection_encoder(
-                        length, repr_dim, controller_out, segm_probs, segms, tensors.is_eval)
+                    governor, _, _ = governor_detection_encoder(
+                        length, repr_dim, frame_probs, segm_probs, segms, left_segms, right_segms, tensors.is_eval)
                     representations['governor'] = governor
                     if shared_resources.config.get('num_slots', 0):
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], governor, frame_probs,
-                            segm_probs, segms, tensors.is_eval)
+                            segm_probs, segms, left_segms, right_segms, tensors.is_eval)
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
                             representations['assoc_' + str(i)] = m
 
-            return representations, frame_probs, boundary_logits, segm_probs, segm_logits
+            return representations, frame_probs, frame_logits, segm_probs, segm_logits
 
         encoded_question, q_boundary_probs, q_boundary_logits, q_segm_probs, q_segm_logits = encoding(
             emb_question, tensors.question_length)
@@ -160,14 +176,14 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
             emb_support, tensors.support_length, True)
 
         # enforce no boundary in question
-        q_mask = tf.expand_dims(tf.sequence_mask(tensors.question_length - 1, dtype=tf.float32), 2)
-        tf.add_to_collection(
-            tf.GraphKeys.LOSSES,
-            shared_resources.config.get('lambda_boundary', 0.0) *
-            tf.reduce_mean(
-                tf.reduce_sum(q_boundary_probs[:, 1:] * q_mask, reduction_indices=[1, 2]) -
-                tf.reduce_sum(q_boundary_probs[:, 0], 1)
-            ))
+        # q_mask = tf.expand_dims(tf.sequence_mask(tensors.question_length - 1, dtype=tf.float32), 2)
+        # tf.add_to_collection(
+        #   tf.GraphKeys.LOSSES,
+        #   shared_resources.config.get('lambda_boundary', 0.0) *
+        #   tf.reduce_mean(
+        #       tf.reduce_sum(q_boundary_probs[:, 1:] * q_mask, reduction_indices=[1, 2]) -
+        #       tf.reduce_sum(q_boundary_probs[:, 0], 1)
+        #   ))
 
         all_start_scores = []
         all_end_scores = []
