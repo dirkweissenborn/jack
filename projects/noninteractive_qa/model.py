@@ -296,7 +296,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                     with tf.variable_scope("layer" + str(i)):
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
-                        segm_probs = tf.cond(step >= 1000 * i,
+                        segm_probs = tf.cond(step >= 200 * i,
                                              lambda: segm_probs,
                                              lambda: tf.stop_gradient(segm_probs))
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
@@ -416,7 +416,7 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                         prev_segm_probs = segm_probs
                         segm_probs, segm_logits = edge_detection_encoder(
                             ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
-                        segm_probs = tf.cond(step >= 1000 * i,
+                        segm_probs = tf.cond(step >= 200 * i,
                                              lambda: segm_probs,
                                              lambda: tf.stop_gradient(segm_probs))
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
@@ -449,8 +449,7 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
         question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state,
-                                  shared_resources.config['num_layers'] * shared_resources.config['num_slots'] + 2, 1)
+        question_state = tf.split(question_state, len(encoded_support), 1)
         for i, (q, s) in enumerate(zip(question_state, encoded_support)):
             with tf.variable_scope('prediction' + str(i)) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
