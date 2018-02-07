@@ -117,6 +117,19 @@ def bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
 
     bow_sum = tf.matmul(segm_contributions, seq_transformed)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
+    segment_reps = bow_sum / (bow_num + 1e-6)
+
+    return segment_reps
+
+
+def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
+    seq_as_start, seq_as_end, seq_transformed = tf.split(
+        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
+
+    segm_contributions = intra_segm_sum_contributions(segm_ends, length)
+
+    bow_sum = tf.matmul(segm_contributions, seq_transformed)
+    bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
     bow_mean = bow_sum / (bow_num + 1e-6)
 
     segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
@@ -153,8 +166,8 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
     return edge_probs, edge_logits
 
 
-def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, inputs, is_eval):
-    governor_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), 1)
+def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval):
+    governor_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
     governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
     exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
     exps *= segm_probs
@@ -168,8 +181,8 @@ def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms,
 
 
 def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms,
-                         inputs, is_eval, num_iterations=1):
-    address_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), num_slots,
+                         ctrl, is_eval, num_iterations=1):
+    address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))

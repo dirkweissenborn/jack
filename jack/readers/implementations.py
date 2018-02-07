@@ -114,6 +114,12 @@ def multi_level_noninteractive_qa_reader(resources_or_conf: Union[dict, SharedRe
 
 
 @extractive_qa_reader
+def hierarchical_segments_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.noninteractive_qa.model import HierarchicalSegmentQAModule
+    return _tf_extractive_qa_reader(HierarchicalSegmentQAModule, resources_or_conf)
+
+
+@extractive_qa_reader
 def non_interactive_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
     from projects.noninteractive_qa.model import NonInteractiveModularQAModule
     return _tf_extractive_qa_reader(NonInteractiveModularQAModule, resources_or_conf)
