@@ -39,7 +39,7 @@ def horizontal_probs(logits, length, segm_probs, is_eval):
     return probs
 
 
-def intra_segm_sum_contributions(segm_probs, length):
+def intra_segm_contributions(segm_probs, length):
     log_keep = tf.log(tf.maximum(1.0 - segm_probs, 1e-8))
     mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
     log_keep *= mask
@@ -98,7 +98,7 @@ def right_segm_sum_contributions(segm_probs, length):
 
 def intra_segm_sum(inputs, segm_probs, length):
     # [B, L, L] * [B, L, D] = [B, L, D]
-    summ = tf.matmul(intra_segm_sum_contributions(segm_probs, length), inputs)
+    summ = tf.matmul(intra_segm_contributions(segm_probs, length), inputs)
     return summ
 
 
@@ -112,7 +112,7 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
 def bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
     seq_transformed = tf.layers.dense(sequence, repr_dim, tf.nn.relu)
 
-    segm_contributions = intra_segm_sum_contributions(segm_ends, length)
+    segm_contributions = intra_segm_contributions(segm_ends, length)
 
     bow_sum = tf.matmul(segm_contributions, seq_transformed)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
@@ -125,7 +125,7 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
     seq_as_start, seq_as_end, seq_transformed = tf.split(
         tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
 
-    segm_contributions = intra_segm_sum_contributions(segm_ends, length)
+    segm_contributions = intra_segm_contributions(segm_ends, length)
 
     bow_sum = tf.matmul(segm_contributions, seq_transformed)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
@@ -168,11 +168,15 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
 def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval):
     governor_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
     governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
+
+    # keep logits in a meaningful interval, e.g. [-5, 5]
+    governor_logits = tf.tanh(governor_logits / 5.0) * 5.0
+
     exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
     exps *= segm_probs
     # probs should not be bigger than 1
     summed_exps = tf.maximum(intra_segm_sum(exps, frame_probs, length), exps)
-    governor_probs = exps / (summed_exps + 1e-8)
+    governor_probs = exps / (summed_exps + 1e-20)
     tf.identity(governor_probs, name='governor_probs')
 
     govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)
@@ -188,7 +192,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, s
     potentials *= segm_probs  # put zero probability on non segment ends
     original_potentials = potentials
 
-    frame_contributions = intra_segm_sum_contributions(frame_probs, length)
+    frame_contributions = intra_segm_contributions(frame_probs, length)
 
     def iteration(address_probs, x):
         potentials = original_potentials
@@ -226,7 +230,7 @@ def simple_assoc_memory_encoder(length, repr_dim, num_slots, governor, frame_pro
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
     potentials *= segm_probs  # put zero probability on non segment ends
 
-    frame_contributions = intra_segm_sum_contributions(frame_probs, length)
+    frame_contributions = intra_segm_contributions(frame_probs, length)
 
     row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials) + 1e-8
     column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
