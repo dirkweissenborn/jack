@@ -127,6 +127,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 emb_support = highway_network(emb_support, 1)
 
         step = tf.train.get_global_step() or tf.constant(2001, tf.int32)
+
         def encoding(inputs, length, reuse=False):
             with tf.variable_scope("encoding", reuse=reuse):
                 with tf.variable_scope("controller"):
@@ -284,6 +285,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 emb_support = highway_network(emb_support, 1)
 
         step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+
         def encoding(inputs, length, reuse=False):
             representations = list()
             with tf.variable_scope("encoding", reuse=reuse):
@@ -300,7 +302,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                         segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
 
-                        segms = tf.cond(step >= 1000 * i, lambda: segms, lambda: tf.zeros_like(segms))
+                        segms, segm_probs = tf.cond(step >= 1000 * i,
+                                                    lambda: (segms, segm_probs),
+                                                    lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
 
                         representations.append(segms)
 
@@ -425,7 +429,9 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                             length, repr_dim, shared_resources.config['num_slots'], segm_probs, prev_segm_probs, segms,
                             ctrl, tensors.is_eval)
 
-                        memory = tf.cond(step >= 1000 * i, lambda: memory, lambda: tf.zeros_like(memory))
+                        memory, segm_probs = tf.cond(step >= 2000 * i,
+                                                     lambda: (memory, segm_probs),
+                                                     lambda: (tf.stop_gradient(memory), tf.stop_gradient(segm_probs)))
 
                         representations.extend(tf.split(memory, shared_resources.config['num_slots'], 2))
 
@@ -485,7 +491,6 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
         if tf.get_collection(tf.GraphKeys.LOSSES):
             loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
         return {Ports.loss: loss}
-
 
 
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
