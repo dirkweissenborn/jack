@@ -302,9 +302,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                         segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
 
-                        segms, segm_probs = tf.cond(step >= 1000 * i,
-                                                    lambda: (segms, segm_probs),
-                                                    lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
+                        segm_probs = tf.cond(step >= 1000 * i,
+                                             lambda: segm_probs,
+                                             lambda: tf.stop_gradient(segm_probs))
 
                         representations.append(segms)
 
@@ -430,8 +430,8 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                             ctrl, tensors.is_eval)
 
                         memory, segm_probs = tf.cond(step >= 2000 * i,
-                                                     lambda: (memory, segm_probs),
-                                                     lambda: (tf.stop_gradient(memory), tf.stop_gradient(segm_probs)))
+                                                     lambda: segm_probs,
+                                                     lambda: tf.stop_gradient(segm_probs))
 
                         representations.extend(tf.split(memory, shared_resources.config['num_slots'], 2))
 
