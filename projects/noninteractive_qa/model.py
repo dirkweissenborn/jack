@@ -429,9 +429,9 @@ class HierarchicalAssocQAModule(AbstractXQAModelModule):
                             length, repr_dim, shared_resources.config['num_slots'], segm_probs, prev_segm_probs, segms,
                             ctrl, tensors.is_eval)
 
-                        memory, segm_probs = tf.cond(step >= 2000 * i,
-                                                     lambda: segm_probs,
-                                                     lambda: tf.stop_gradient(segm_probs))
+                        segm_probs = tf.cond(step >= 2000 * i,
+                                             lambda: segm_probs,
+                                             lambda: tf.stop_gradient(segm_probs))
 
                         representations.extend(tf.split(memory, shared_resources.config['num_slots'], 2))
 
