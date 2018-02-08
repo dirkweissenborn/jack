@@ -290,6 +290,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 segm_probs = None
                 segms = inputs
                 ctrl = gated_linear_convnet(repr_dim, inputs, 2, 5)
+                original_ctrl = ctrl
                 representations.append(inputs)
                 representations.append(ctrl)
                 for i in range(shared_resources.config['num_layers']):
@@ -309,7 +310,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         left_segms = tf.matmul(left_segm_contribs, segms)
                         right_segms = tf.matmul(right_segm_contribs, segms)
 
-                        ctrl = tf.concat([segms, left_segms, right_segms], 2)
+                        ctrl = tf.concat([original_ctrl, segms, left_segms, right_segms], 2)
 
             return representations
 
