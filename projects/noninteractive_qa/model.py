@@ -162,14 +162,15 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     # segms, segm_probs = tf.cond(step > 2000,
                     #                            lambda: (segms, segm_probs),
                     #                            lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
+                    governor_ctrl = tf.concat([controller_out, segms], 2)
                     governor, _, _ = governor_detection_encoder(
-                        length, repr_dim, frame_probs, segm_probs, segms, segm_ctrl, tensors.is_eval)
+                        length, repr_dim, frame_probs, segm_probs, segms, governor_ctrl, tensors.is_eval)
                     representations['governor'] = governor
                     if shared_resources.config.get('num_slots', 0):
-                        inputs = tf.concat([segm_ctrl, governor], 2)
+                        assoc_ctrl = tf.concat([segm_ctrl, governor], 2)
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs,
-                            segm_probs, segms, inputs, tensors.is_eval)
+                            segm_probs, segms, assoc_ctrl, tensors.is_eval)
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
                             representations['assoc_' + str(i)] = m
 
