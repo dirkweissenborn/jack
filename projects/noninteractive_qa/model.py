@@ -300,7 +300,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                         segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
 
-                        segms = tf.cond(step >= 200 * i, lambda: segms, lambda: tf.zeros_like(segms))
+                        segms = tf.cond(step >= 1000 * i, lambda: segms, lambda: tf.zeros_like(segms))
 
                         representations.append(segms)
 
