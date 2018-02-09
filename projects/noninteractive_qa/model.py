@@ -173,7 +173,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs,
                             segm_probs, segms, assoc_ctrl, tensors.is_eval)
                         if shared_resources.config.get('load_dir') is None:
-                            memory = tf.cond(step >= 5000, lambda: memory, lambda: tf.stop_gradient(memory))
+                            memory = tf.cond(step >= 3000, lambda: memory, lambda: tf.stop_gradient(memory))
                         for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
                             representations['assoc_' + str(i)] = m
 
