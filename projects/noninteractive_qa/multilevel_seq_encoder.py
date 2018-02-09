@@ -169,7 +169,7 @@ def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms,
     governor_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
     governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
 
-    # keep logits in a meaningful interval, e.g. [-5, 5]
+    # keep logits in a meaningful interval, e.g. [-20, 20]
     governor_logits = tf.tanh(governor_logits / 20.0) * 20.0
 
     exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
@@ -188,6 +188,7 @@ def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, s
     address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))
+    address_logits = tf.tanh(address_logits / 20.0) * 20.0
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
     potentials *= segm_probs  # put zero probability on non segment ends
     original_potentials = potentials
@@ -198,11 +199,11 @@ def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, s
         potentials = original_potentials
         if address_probs is not None:
             potentials *= address_probs
-        row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials) + 1e-8
-        column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True) + 1e-8
-        weights = potentials * potentials / column_sum / row_sum
+        row_sum = tf.maximum(tf.matmul(frame_contributions, potentials), potentials)
+        column_sum = tf.reduce_sum(potentials, axis=2, keep_dims=True)
+        weights = tf.square(potentials) / (column_sum * row_sum + 1e-20)
         row_weight_sum = tf.matmul(frame_contributions, weights) + 1e-8
-        column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-8
+        column_weight_sum = tf.reduce_sum(weights, axis=2, keep_dims=True) + 1e-20
         address_probs = weights / tf.maximum(row_weight_sum, column_weight_sum)
         return address_probs
 
