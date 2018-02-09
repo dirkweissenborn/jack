@@ -188,7 +188,6 @@ def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, s
     address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots,
                                      bias_initializer=tf.constant_initializer(0.0))
     address_logits = tf.cond(is_eval, lambda: address_logits, lambda: gumbel_logits(address_logits))
-    address_logits = tf.tanh(address_logits / 20.0) * 20.0
     potentials = tf.exp(address_logits - tf.reduce_max(address_logits, axis=1, keep_dims=True))
     potentials *= segm_probs  # put zero probability on non segment ends
     original_potentials = potentials
