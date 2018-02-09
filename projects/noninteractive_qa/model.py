@@ -161,12 +161,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     left_segms = tf.matmul(left_segm_contribs, segms)
                     right_segms = tf.matmul(right_segm_contribs, segms)
 
-                    segm_ctrl = tf.nn.relu(segms + tf.layers.dense(
-                        tf.concat([left_segms, right_segms], 2), segms.get_shape()[-1].value))
-
                     if (shared_resources.config.get('num_slots', 0) and
                                 'assoc' in shared_resources.config['prediction_levels']):
-                        assoc_ctrl = segm_ctrl  # tf.concat([segms, segm_ctrl], 2)
+                        assoc_ctrl = tf.concat([segms, left_segms, right_segms], 2)
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs,
                             segm_probs, segms, assoc_ctrl, tensors.is_eval)
