@@ -12,8 +12,8 @@ from jack.tfutil.highway import highway_network
 from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
-from projects.noninteractive_qa.multilevel_seq_encoder import governor_detection_encoder, \
-    assoc_memory_encoder, edge_detection_encoder, left_segm_sum_contributions, \
+from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
+    left_segm_sum_contributions, \
     right_segm_sum_contributions, bow_start_end_segm_encoder
 
 
@@ -154,7 +154,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     # right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
 
                     # left_segms = tf.matmul(left_segm_contribs, segms)
-                    #right_segms = tf.matmul(right_segm_contribs, segms)
+                    # right_segms = tf.matmul(right_segm_contribs, segms)
 
                     # segm_ctrl = tf.nn.relu(segms + tf.layers.dense(
                     #    tf.concat([left_segms, right_segms], 2), segms.get_shape()[-1].value))
@@ -162,12 +162,13 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     # segms, segm_probs = tf.cond(step > 2000,
                     #                            lambda: (segms, segm_probs),
                     #                            lambda: (tf.stop_gradient(segms), tf.stop_gradient(segm_probs)))
-                    governor_ctrl = tf.concat([controller_out, segms], 2)
-                    governor, _, _ = governor_detection_encoder(
-                        length, repr_dim, frame_probs, segm_probs, segms, governor_ctrl, tensors.is_eval)
-                    representations['governor'] = governor
-                    if shared_resources.config.get('num_slots', 0):
-                        assoc_ctrl = tf.concat([segms, governor], 2)
+                    # governor_ctrl = tf.concat([controller_out, segms], 2)
+                    # governor, _, _ = governor_detection_encoder(
+                    #    length, repr_dim, frame_probs, segm_probs, segms, governor_ctrl, tensors.is_eval)
+                    # representations['governor'] = governor
+                    if (shared_resources.config.get('num_slots', 0) and
+                                'assoc' in shared_resources.config['prediction_levels']):
+                        assoc_ctrl = tf.concat([segms, controller_out], 2)
                         memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs,
                             segm_probs, segms, assoc_ctrl, tensors.is_eval)

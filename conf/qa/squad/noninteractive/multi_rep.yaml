@@ -9,7 +9,7 @@ reader: 'multi_level_noninteractive_qa_reader'
 name: 'multi_level_noninteractive_qa_reader'
 
 
-prediction_levels: ['word', 'ctrl', 'segm', 'governor', 'assoc']
+prediction_levels: ['word', 'ctrl', 'segm', 'assoc']
 
 num_slots: 5
 
