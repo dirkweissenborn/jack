@@ -127,8 +127,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 emb_support = highway_network(emb_support, 1)
 
                 mask = tf.nn.dropout(tf.ones([1, 1, repr_dim]), keep_prob=1.0 - dropout)
-                emb_support *= mask
-                emb_question *= mask
+                emb_support, emb_question = tf.cond(tensors.is_eval,
+                                                    lambda: (emb_support, emb_question),
+                                                    lambda: (emb_support * mask, emb_question * mask))
 
         step = tf.train.get_global_step() or tf.constant(20001, tf.int32)
 
