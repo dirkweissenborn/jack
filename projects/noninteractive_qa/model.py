@@ -14,7 +14,7 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
     left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder, simple_assoc_memory_encoder
+    right_segm_sum_contributions, bow_start_end_segm_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -166,8 +166,10 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                     if (shared_resources.config.get('num_slots', 0) and
                                 'assoc' in shared_resources.config['prediction_levels']):
-                        assoc_ctrl = tf.concat([segms, left_segms, right_segms, left2_segms, right2_segms], 2)
-                        memory, _, _ = simple_assoc_memory_encoder(
+                        assoc_ctrl = segms + tf.layers.dense(
+                            tf.concat([segms, left_segms, right_segms, left2_segms, right2_segms], 2),
+                            segms.get_shape()[-1].value, tf.nn.relu)
+                        memory, _, _ = assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs,
                             segm_probs, segms, assoc_ctrl, tensors.is_eval)
                         if shared_resources.config.get('load_dir') is None:
