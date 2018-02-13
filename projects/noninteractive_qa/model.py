@@ -14,7 +14,7 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
     left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder, segment_selection_encoder
+    right_segm_sum_contributions, bow_start_end_segm_encoder, gumbel_logits, intra_segm_contributions
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -131,7 +131,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                                                     lambda: (emb_support, emb_question),
                                                     lambda: (emb_support * mask, emb_question * mask))
 
-        step = tf.train.get_global_step() or tf.constant(20001, tf.int32)
+        step = tf.train.get_global_step() or tf.constant(100000, tf.int32)
 
         def encoding(inputs, length, reuse=False):
             with tf.variable_scope("encoding", reuse=reuse):
@@ -164,29 +164,38 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         assoc_ctrl = segms + tf.layers.dense(
                             tf.concat([segms, left_segms, right_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
-                        left2_segms = tf.matmul(left_segm_contribs, assoc_ctrl)
-                        right2_segms = tf.matmul(right_segm_contribs, assoc_ctrl)
-                        assoc_ctrl = segms + tf.layers.dense(
-                            tf.concat([segms, left2_segms, right2_segms], 2),
-                            segms.get_shape()[-1].value, tf.nn.relu)
+                        # left2_segms = tf.matmul(left_segm_contribs, assoc_ctrl)
+                        # right2_segms = tf.matmul(right_segm_contribs, assoc_ctrl)
+                        # assoc_ctrl = segms + tf.layers.dense(
+                        #    tf.concat([assoc_ctrl, left2_segms, right2_segms], 2),
+                        #    segms.get_shape()[-1].value, tf.nn.relu)
+                        assoc_ctrl = segms
                         allowed = segm_probs
 
-                        def select_segm(allowed, ctrl, with_sentinel):
-                            selected, probs, logits = segment_selection_encoder(
-                                length, repr_dim, frame_probs, allowed, segms, ctrl, tensors.is_eval,
-                                with_sentinel=True)
-                            return selected, probs
+                        assoc_logits = tf.layers.dense(tf.layers.dense(assoc_ctrl, repr_dim, tf.nn.relu),
+                                                       shared_resources.config['num_slots'])
+                        assoc_logits = tf.cond(tensors.is_eval, lambda: assoc_logits,
+                                               lambda: gumbel_logits(assoc_logits))
+
+                        exps = tf.exp(assoc_logits - tf.reduce_max(assoc_logits, axis=1, keep_dims=True))
+                        exps = tf.split(exps, shared_resources.config['num_slots'], 2)
 
                         assoc_probs = []
+                        frame_contributions = intra_segm_contributions(frame_probs, length)
                         for i in range(shared_resources.config.get('num_slots', 0)):
-                            with tf.variable_scope('assoc_' + str(i)):
-                                selected, probs = tf.cond(step >= (i + 1) * 1000,
-                                                          lambda: select_segm(allowed, assoc_ctrl, i > 0),
-                                                          lambda: (tf.zeros_like(segms), tf.zeros_like(segm_probs)))
-                                representations['assoc_' + str(i)] = selected
-                                # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
-                                allowed *= (1.0 - probs)
-                                assoc_probs.append(probs)
+                            potentials = exps[i] * allowed
+                            # probs should not be bigger than 1
+                            summed = tf.maximum(tf.matmul(frame_contributions, potentials), potentials)
+                            if i > 0:
+                                summed += tf.exp(tf.get_variable('sentinel_' + str(i), [], tf.float32,
+                                                                 tf.constant_initializer(-5.0)))
+                            probs = potentials / (summed + 1e-20)
+                            selected = tf.matmul(frame_contributions, probs * segms)
+                            selected = tf.cond(step >= 5000, lambda: selected, lambda: tf.stop_gradient(selected))
+                            representations['assoc_' + str(i)] = selected
+                            # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
+                            allowed *= (1.0 - probs)
+                            assoc_probs.append(probs)
                         tf.identity(tf.concat(assoc_probs, 2), 'assoc_probs')
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits

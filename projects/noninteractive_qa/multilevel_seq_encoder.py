@@ -176,7 +176,6 @@ def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, 
     if with_sentinel:
         summed_exps += tf.exp(tf.get_variable('sentinel', [], tf.float32, tf.constant_initializer(-5.0)))
     probs = exps / (summed_exps + 1e-20)
-    probs *= segm_probs
 
     selected = intra_segm_sum(probs * segms, frame_probs, length)
     return selected, probs, logits
