@@ -14,7 +14,7 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
     left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder
+    right_segm_sum_contributions, bow_start_end_segm_encoder, segment_selection_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -155,27 +155,30 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs, tensors.is_eval)
                     representations['segm'] = segms
 
-                    left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
-                    right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
+                    if 'assoc' in shared_resources.config['prediction_levels']:
+                        left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
+                        right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
 
-                    left_segms = tf.matmul(left_segm_contribs, segms)
-                    right_segms = tf.matmul(right_segm_contribs, segms)
-
-                    left2_segms = tf.matmul(left_segm_contribs, left_segms)
-                    right2_segms = tf.matmul(right_segm_contribs, right_segms)
-
-                    if (shared_resources.config.get('num_slots', 0) and
-                                'assoc' in shared_resources.config['prediction_levels']):
+                        left_segms = tf.matmul(left_segm_contribs, segms)
+                        right_segms = tf.matmul(right_segm_contribs, segms)
                         assoc_ctrl = segms + tf.layers.dense(
-                            tf.concat([segms, left_segms, right_segms, left2_segms, right2_segms], 2),
+                            tf.concat([segms, left_segms, right_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
-                        memory, _, _ = assoc_memory_encoder(
-                            length, repr_dim, shared_resources.config['num_slots'], frame_probs,
-                            segm_probs, segms, assoc_ctrl, tensors.is_eval)
-                        if shared_resources.config.get('load_dir') is None:
-                            memory = tf.cond(step >= 5000, lambda: memory, lambda: tf.stop_gradient(memory))
-                        for i, m in enumerate(tf.split(memory, shared_resources.config['num_slots'], 2)):
-                            representations['assoc_' + str(i)] = m
+                        left2_segms = tf.matmul(left_segm_contribs, assoc_ctrl)
+                        right2_segms = tf.matmul(right_segm_contribs, assoc_ctrl)
+                        assoc_ctrl = segms + tf.layers.dense(
+                            tf.concat([segms, left2_segms, right2_segms], 2),
+                            segms.get_shape()[-1].value, tf.nn.relu)
+                        allowed = segm_probs
+                        for i in range(shared_resources.config.get('num_slots', 0)):
+                            selected, probs, logits = segment_selection_encoder(
+                                length, repr_dim, frame_probs, allowed, segms, assoc_ctrl, tensors.is_eval)
+                            if shared_resources.config.get('load_dir') is None:
+                                selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
+                                                   lambda: tf.stop_gradient(selected))
+                            representations['assoc_' + str(i)] = selected
+                            assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
+                            allowed = tf.maximum(allowed - selected, 0.0)
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits
 

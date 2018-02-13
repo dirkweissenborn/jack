@@ -165,22 +165,19 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
     return edge_probs, edge_logits
 
 
-def governor_detection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval):
-    governor_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
-    governor_logits = tf.cond(is_eval, lambda: governor_logits, lambda: gumbel_logits(governor_logits))
+def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval):
+    logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
+    logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
 
-    # keep logits in a meaningful interval, e.g. [-20, 20]
-    governor_logits = tf.tanh(governor_logits / 20.0) * 20.0
-
-    exps = tf.exp(governor_logits - tf.reduce_max(governor_logits, axis=1, keep_dims=True))
+    exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
     exps *= segm_probs
     # probs should not be bigger than 1
     summed_exps = tf.maximum(intra_segm_sum(exps, frame_probs, length), exps)
-    governor_probs = exps / (summed_exps + 1e-20)
-    tf.identity(governor_probs, name='governor_probs')
+    probs = exps / (summed_exps + 1e-20)
+    probs *= segm_probs
 
-    govenors = intra_segm_sum(governor_probs * segms, frame_probs, length)
-    return govenors, governor_probs, governor_logits
+    selected = intra_segm_sum(probs * segms, frame_probs, length)
+    return selected, probs, logits
 
 
 def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms, ctrl, is_eval, num_iterations=1):
