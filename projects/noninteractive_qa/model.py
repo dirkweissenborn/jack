@@ -171,7 +171,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                             segms.get_shape()[-1].value, tf.nn.relu)
                         allowed = segm_probs
 
-                        def select_segm(allowed, ctrl):
+                        def select_segm(allowed, ctrl, with_sentinel):
                             selected, probs, logits = segment_selection_encoder(
                                 length, repr_dim, frame_probs, allowed, segms, ctrl, tensors.is_eval,
                                 with_sentinel=True)
@@ -181,7 +181,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         for i in range(shared_resources.config.get('num_slots', 0)):
                             with tf.variable_scope('assoc_' + str(i)):
                                 selected, probs = tf.cond(step >= (i + 1) * 1000,
-                                                          lambda: select_segm(allowed, assoc_ctrl),
+                                                          lambda: select_segm(allowed, assoc_ctrl, i > 0),
                                                           lambda: (tf.zeros_like(segms), tf.zeros_like(segm_probs)))
                                 representations['assoc_' + str(i)] = selected
                                 # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
