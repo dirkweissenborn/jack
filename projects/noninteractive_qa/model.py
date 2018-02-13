@@ -177,8 +177,8 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                                 selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
                                                    lambda: tf.stop_gradient(selected))
                             representations['assoc_' + str(i)] = selected
-                            assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
-                            allowed = tf.maximum(allowed - selected, 0.0)
+                            # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
+                            allowed *= (1.0 - selected)
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits
 
