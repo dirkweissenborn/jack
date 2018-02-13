@@ -165,7 +165,7 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
     return edge_probs, edge_logits
 
 
-def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval):
+def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval, with_sentinel=False):
     logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
     logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
 
@@ -173,6 +173,8 @@ def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, 
     exps *= segm_probs
     # probs should not be bigger than 1
     summed_exps = tf.maximum(intra_segm_sum(exps, frame_probs, length), exps)
+    if with_sentinel:
+        summed_exps += tf.exp(tf.get_variable('sentinel', [], tf.float32, tf.constant_initializer(-5.0)))
     probs = exps / (summed_exps + 1e-20)
     probs *= segm_probs
 

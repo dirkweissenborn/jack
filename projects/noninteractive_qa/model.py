@@ -171,14 +171,16 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                             segms.get_shape()[-1].value, tf.nn.relu)
                         allowed = segm_probs
                         for i in range(shared_resources.config.get('num_slots', 0)):
-                            selected, probs, logits = segment_selection_encoder(
-                                length, repr_dim, frame_probs, allowed, segms, assoc_ctrl, tensors.is_eval)
-                            if shared_resources.config.get('load_dir') is None:
-                                selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
-                                                   lambda: tf.zeros_like(selected))
-                            representations['assoc_' + str(i)] = selected
-                            # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
-                            allowed *= (1.0 - selected)
+                            with tf.variable_scope('assoc_' + str(i)):
+                                selected, probs, logits = segment_selection_encoder(
+                                    length, repr_dim, frame_probs, allowed, segms, assoc_ctrl, tensors.is_eval,
+                                    with_sentinel=True)
+                                if shared_resources.config.get('load_dir') is None:
+                                    selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
+                                                       lambda: tf.zeros_like(selected))
+                                representations['assoc_' + str(i)] = selected
+                                # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
+                                allowed *= (1.0 - selected)
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits
 
