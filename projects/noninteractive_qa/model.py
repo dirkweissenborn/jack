@@ -170,17 +170,24 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                             tf.concat([segms, left2_segms, right2_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
                         allowed = segm_probs
+
+                        def select_segm(allowed, ctrl):
+                            selected, probs, logits = segment_selection_encoder(
+                                length, repr_dim, frame_probs, allowed, segms, ctrl, tensors.is_eval,
+                                with_sentinel=True)
+                            return selected, probs
+
+                        assoc_probs = []
                         for i in range(shared_resources.config.get('num_slots', 0)):
                             with tf.variable_scope('assoc_' + str(i)):
-                                selected, probs, logits = segment_selection_encoder(
-                                    length, repr_dim, frame_probs, allowed, segms, assoc_ctrl, tensors.is_eval,
-                                    with_sentinel=True)
-                                if shared_resources.config.get('load_dir') is None:
-                                    selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
-                                                       lambda: tf.zeros_like(selected))
+                                selected, probs = tf.cond(step >= (i + 1) * 1000,
+                                                          lambda: select_segm(allowed, assoc_ctrl),
+                                                          lambda: (tf.zeros_like(segms), tf.zeros_like(segm_probs)))
                                 representations['assoc_' + str(i)] = selected
                                 # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
-                                allowed *= (1.0 - selected)
+                                allowed *= (1.0 - probs)
+                                assoc_probs.append(probs)
+                        tf.identity(tf.concat(assoc_probs, 2), 'assoc_probs')
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits
 
