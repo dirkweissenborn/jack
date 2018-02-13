@@ -175,7 +175,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                                 length, repr_dim, frame_probs, allowed, segms, assoc_ctrl, tensors.is_eval)
                             if shared_resources.config.get('load_dir') is None:
                                 selected = tf.cond(step >= (i + 1) * 1000, lambda: selected,
-                                                   lambda: tf.stop_gradient(selected))
+                                                   lambda: tf.zeros_like(selected))
                             representations['assoc_' + str(i)] = selected
                             # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
                             allowed *= (1.0 - selected)
