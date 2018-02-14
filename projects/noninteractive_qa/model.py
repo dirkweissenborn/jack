@@ -162,13 +162,13 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         left_segms = tf.matmul(left_segm_contribs, segms)
                         right_segms = tf.matmul(right_segm_contribs, segms)
                         assoc_ctrl = segms + tf.layers.dense(
-                            tf.concat([segms, left_segms, right_segms], 2),
+                            tf.concat([left_segms, right_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
-                        # left2_segms = tf.matmul(left_segm_contribs, assoc_ctrl)
-                        # right2_segms = tf.matmul(right_segm_contribs, assoc_ctrl)
-                        # assoc_ctrl = segms + tf.layers.dense(
-                        #    tf.concat([assoc_ctrl, left2_segms, right2_segms], 2),
-                        #    segms.get_shape()[-1].value, tf.nn.relu)
+                        left2_segms = tf.matmul(left_segm_contribs, assoc_ctrl)
+                        right2_segms = tf.matmul(right_segm_contribs, assoc_ctrl)
+                        assoc_ctrl = assoc_ctrl + tf.layers.dense(
+                            tf.concat([left2_segms, right2_segms], 2),
+                            segms.get_shape()[-1].value, tf.nn.relu)
                         assoc_ctrl = segms
                         allowed = segm_probs
 

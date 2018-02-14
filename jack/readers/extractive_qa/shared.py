@@ -4,8 +4,6 @@ This file contains reusable modules for extractive QA models and ports
 import sys
 from typing import NamedTuple
 
-import progressbar
-
 from jack.core import *
 from jack.readers.extractive_qa.util import prepare_data
 from jack.util import preprocessing
@@ -142,7 +140,8 @@ class XQAInputModule(OnlineInputModule[XQAAnnotation]):
         q_tokenized, q_ids, _, q_length, s_tokenized, s_ids, _, s_length, \
         word_in_question, token_offsets, answer_spans = prepare_data(
             question, answers, self.vocab, self.config.get("lowercase", False),
-            with_answers=has_answers, max_support_length=self.config.get("max_support_length", None))
+            with_answers=has_answers, max_support_length=self.config.get("max_support_length", None),
+            spacy_nlp=True)
 
         max_num_support = self.config.get("max_num_support", len(question.support))  # take all per default
 
