@@ -4,9 +4,9 @@ seed: 1337
 repr_dim: 128
 dropout: 0.2
 epochs: 15
-learning_rate: 5e-4
+learning_rate: 0.0005
 
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
 
-num_layers: 3
+depth: 2

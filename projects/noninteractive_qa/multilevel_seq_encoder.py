@@ -109,26 +109,30 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
     return controller_out
 
 
-def bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
+def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
+    if mask is None:
+        mask = tf.ones_like(segm_ends)
     seq_transformed = tf.layers.dense(sequence, repr_dim, tf.nn.relu)
 
     segm_contributions = intra_segm_contributions(segm_ends, length)
 
-    bow_sum = tf.matmul(segm_contributions, seq_transformed)
-    bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
+    bow_sum = tf.matmul(segm_contributions, seq_transformed * mask)
+    bow_num = tf.matmul(segm_contributions, mask)
     segment_reps = bow_sum / (bow_num + 1e-6)
 
     return segment_reps
 
 
-def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
+def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
+    if mask is None:
+        mask = tf.ones_like(segm_ends)
     seq_as_start, seq_as_end, seq_transformed = tf.split(
         tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
 
     segm_contributions = intra_segm_contributions(segm_ends, length)
 
-    bow_sum = tf.matmul(segm_contributions, seq_transformed)
-    bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
+    bow_sum = tf.matmul(segm_contributions, seq_transformed * mask)
+    bow_num = tf.matmul(segm_contributions, mask)
     bow_mean = bow_sum / (bow_num + 1e-6)
 
     segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
@@ -140,7 +144,7 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval):
     return segment_reps
 
 
-def segmentation_encoder(sequence, length, repr_dim, segm_ends, is_eval):
+def segmentation_encoder(sequence, length, repr_dim, segm_ends):
     memory_rnn = SegmentationCell(repr_dim)
     forward_memories, final_memory = tf.nn.dynamic_rnn(memory_rnn, (sequence, segm_ends), length, dtype=tf.float32)
 

@@ -14,7 +14,7 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
     left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder, gumbel_logits, intra_segm_contributions
+    right_segm_sum_contributions, bow_start_end_segm_encoder, gumbel_logits, intra_segm_contributions, bow_segm_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -152,7 +152,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                 with tf.variable_scope("representations"):
                     representations['word'] = inputs
-                    segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs, tensors.is_eval)
+                    segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
                     representations['segm'] = segms
 
                     if 'assoc' in shared_resources.config['prediction_levels']:
@@ -314,31 +314,50 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         def encoding(inputs, length, reuse=False):
             representations = list()
             with tf.variable_scope("encoding", reuse=reuse):
-                segm_probs = None
-                segms = inputs
                 ctrl = gated_linear_convnet(repr_dim, inputs, 2, 5)
-                original_ctrl = ctrl
+                segm_probs, segm_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval)
+                push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
+                pop_probs, pop_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
+                                                               mask=segm_probs * (1.0 - push_probs))
+
+                tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+                tf.identity(tf.sigmoid(push_logits), name='push_probs')
+                tf.identity(tf.sigmoid(pop_logits), name='pop_probs')
+                depth = float(shared_resources.config['depth'])
+
                 representations.append(inputs)
                 representations.append(ctrl)
-                for i in range(shared_resources.config['num_layers']):
-                    with tf.variable_scope("layer" + str(i)):
-                        segm_probs, segm_logits = edge_detection_encoder(
-                            ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
-                        segm_probs = tf.cond(step >= 1000 * i,
-                                             lambda: segm_probs,
-                                             lambda: tf.stop_gradient(segm_probs))
-                        tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-                        segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, tensors.is_eval)
 
-                        representations.append(segms)
+                zeros = tf.zeros([tf.shape(inputs)[0], 1])
 
-                        left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
-                        right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
+                def push_pop_ctrl(acc, input):
+                    push, pop = input
 
-                        left_segms = tf.matmul(left_segm_contribs, segms)
-                        right_segms = tf.matmul(right_segm_contribs, segms)
+                    acc = (push * tf.concat([zeros, acc[:, :-1]], 1) + (1.0 - push) * acc +
+                           push * tf.concat([tf.tile(zeros, [1, int(depth - 1)]), acc[:, -1:]], 1))
 
-                        ctrl = tf.concat([original_ctrl, segms, left_segms, right_segms], 2)
+                    acc = (pop * tf.concat([acc[:, 1:], zeros], 1) + (1.0 - pop) * acc +
+                           pop * tf.concat([acc[:, :1], tf.tile(zeros, [1, int(depth - 1)])], 1))
+
+                    return acc
+
+                depth_prob = tf.scan(push_pop_ctrl, (tf.transpose(push_probs, [1, 0, 2]),
+                                                     tf.transpose(pop_probs, [1, 0, 2])),
+                                     initializer=tf.one_hot(tf.zeros([tf.shape(inputs)[0]], dtype=tf.int32),
+                                                            int(depth)))
+                depth_prob = tf.transpose(depth_prob, [1, 0, 2])
+
+                tf.identity(depth_prob, 'depth_prob')
+
+                representations.append(bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs))
+                frames = list()
+                for p in tf.split(depth_prob, int(depth), 2):
+                    this_segm_probs = segm_probs * p
+                    segms = bow_start_end_segm_encoder(inputs, length, repr_dim, this_segm_probs)
+                    frame_probs = pop_probs * p
+                    frames.append(bow_segm_encoder(segms, length, repr_dim, frame_probs, this_segm_probs))
+
+                representations.append(tf.reduce_sum(tf.stack(frames, 2) * tf.expand_dims(depth_prob, 3), 2))
 
             return representations
 
@@ -352,7 +371,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
         question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state, shared_resources.config['num_layers'] + 2, 1)
+        question_state = tf.split(question_state, len(encoded_support), 1)
         for i, (q, s) in enumerate(zip(question_state, encoded_support)):
             with tf.variable_scope('prediction' + str(i)) as vs:
                 question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
