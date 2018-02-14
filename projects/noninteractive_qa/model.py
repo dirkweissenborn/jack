@@ -316,9 +316,10 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
             with tf.variable_scope("encoding", reuse=reuse):
                 ctrl = gated_linear_convnet(repr_dim, inputs, 2, 5)
                 segm_probs, segm_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval)
-                push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
                 pop_probs, pop_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
-                                                               mask=segm_probs * (1.0 - push_probs))
+                                                               mask=segm_probs)
+                push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
+                                                                 mask=segm_probs * (1.0 - pop_probs))
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 tf.identity(tf.sigmoid(push_logits), name='push_probs')
