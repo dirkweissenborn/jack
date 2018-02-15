@@ -335,17 +335,26 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 push_matrix = tf.matrix_band_part(push_matrix, 0, 1)
                 pop_matrix = tf.tile(tf.expand_dims(pop_probs, 3), [1, 1, depth, depth])
                 pop_matrix = tf.matrix_band_part(pop_matrix, 1, 0)
-                push_pop_diag = tf.tile((1.0 - push_probs) * (1.0 - pop_probs), [1, 1, depth])
-                push_pop_matrix = push_matrix + pop_matrix + tf.matrix_diag(push_pop_diag)
+                push_pop_diag = tf.tile(push_probs + pop_probs, [1, 1, depth])
+                push_pop_matrix = push_matrix + pop_matrix - tf.matrix_diag(push_pop_diag)
+
+                push_pop_diag = tf.reduce_prod(1.0 - push_pop_matrix, 2)
+                push_pop_matrix += tf.matrix_diag(push_pop_diag)
+
+                # push_pop_matrix = tf.Print(push_pop_matrix, [push_pop_matrix], summarize=10)
 
                 def push_pop_ctrl(acc, pp_matrix):
-                    return tf.einsum('ijk,ik->ij', pp_matrix, acc)
+                    acc = tf.einsum('ij,ijk->ik', acc, pp_matrix)
+                    return acc / tf.reduce_sum(acc, 1, keep_dims=True)
 
                 depth_prob_init = tf.one_hot(
                     tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32), depth)
 
                 depth_prob = tf.scan(push_pop_ctrl, tf.transpose(push_pop_matrix, [1, 0, 2, 3]),
                                      initializer=depth_prob_init[0])
+
+                depth_prob = tf.cond(step > 1000, lambda: depth_prob, lambda: depth_prob_init)
+
                 depth_prob_shift = tf.concat([depth_prob_init[:1], depth_prob[:-1]], 0)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
                 depth_prob_shift = tf.transpose(depth_prob_shift, [1, 0, 2])
@@ -359,9 +368,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 depth_prob_shift_split = tf.split(depth_prob_shift, depth, 2)
                 for i, (p, p_shift) in enumerate(zip(depth_prob_split, depth_prob_shift_split)):
                     with tf.variable_scope('segmentation', reuse=i > 0):
-                        if i > 0:
-                            p += p_shift * pop_probs  # share segment end on pop with lower layer
                         frame_probs = pop_probs * p_shift
+                        if i > 0:
+                            p += frame_probs  # share segment end on pop with lower layer
                         this_segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs * p)
                         frames.append(bow_segm_encoder(this_segms, length, repr_dim, frame_probs, segm_probs * p))
                         segms.append(this_segms)
