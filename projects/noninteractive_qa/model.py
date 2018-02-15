@@ -352,7 +352,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                                                          tf.transpose(pop_probs, [1, 0, 2])),
                                          initializer=depth_prob_init[0]),
                                      lambda: depth_prob_init)
+                depth_prob_shift = tf.concat([depth_prob_init[:1], depth_prob[:-1]], 0)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
+                depth_prob_shift = tf.transpose(depth_prob_shift, [1, 0, 2])
 
                 tf.identity(depth_prob, 'depth_prob')
 
@@ -360,7 +362,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 representations.append(bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs))
                 frames = list()
                 depth_prob_split = tf.split(depth_prob, int(depth), 2)
-                depth_prob_shift = tf.concat([depth_prob_init[0, :, tf.newaxis], depth_prob[:-1]], 1)
+
                 depth_prob_shift_split = tf.split(depth_prob_shift, int(depth), 2)
                 for i, (p, p_shift) in enumerate(zip(depth_prob_split, depth_prob_shift_split)):
                     with tf.variable_scope('frames', reuse=i > 0):
