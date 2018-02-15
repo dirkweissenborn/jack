@@ -318,6 +318,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 segm_probs, segm_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval)
                 pop_probs, pop_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
                                                                mask=segm_probs)
+
                 push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
                                                                  mask=segm_probs * (1.0 - pop_probs))
 
@@ -342,10 +343,15 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
 
                     return acc
 
-                depth_prob = tf.scan(push_pop_ctrl, (tf.transpose(push_probs, [1, 0, 2]),
-                                                     tf.transpose(pop_probs, [1, 0, 2])),
-                                     initializer=tf.one_hot(tf.zeros([tf.shape(inputs)[0]], dtype=tf.int32),
-                                                            int(depth)))
+                depth_prob = tf.one_hot(tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32),
+                                        int(depth))
+
+                depth_prob = tf.cond(step > 2000,
+                                     lambda: tf.scan(
+                                         push_pop_ctrl, (tf.transpose(push_probs, [1, 0, 2]),
+                                                         tf.transpose(pop_probs, [1, 0, 2])),
+                                         initializer=depth_prob[0]),
+                                     lambda: depth_prob)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
 
                 tf.identity(depth_prob, 'depth_prob')
