@@ -335,17 +335,17 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 push_matrix = tf.matrix_band_part(push_matrix, 0, 1)
                 pop_matrix = tf.tile(tf.expand_dims(pop_probs, 3), [1, 1, depth, depth])
                 pop_matrix = tf.matrix_band_part(pop_matrix, 1, 0)
-                push_pop_diag = tf.tile(push_probs + pop_probs, [1, 1, depth])
-                push_pop_matrix = push_matrix + pop_matrix - tf.matrix_diag(push_pop_diag)
+                push_pop_matrix = push_matrix + pop_matrix
+                push_pop_matrix -= tf.matrix_band_part(push_pop_matrix, 0, 0)
 
-                push_pop_diag = tf.reduce_prod(1.0 - push_pop_matrix, 2)
-                push_pop_matrix += tf.matrix_diag(push_pop_diag)
+                push_pop_diag = tf.reduce_sum(push_pop_matrix, 3)
+                push_pop_matrix += tf.matrix_diag(1.0 - push_pop_diag)
 
-                # push_pop_matrix = tf.Print(push_pop_matrix, [push_pop_matrix], summarize=10)
+                # push_pop_matrix = tf.Print(push_pop_matrix, [push_pop_matrix], summarize=30)
 
                 def push_pop_ctrl(acc, pp_matrix):
                     acc = tf.einsum('ij,ijk->ik', acc, pp_matrix)
-                    return acc / tf.reduce_sum(acc, 1, keep_dims=True)
+                    return acc
 
                 depth_prob_init = tf.one_hot(
                     tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32), depth)
@@ -353,7 +353,8 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 depth_prob = tf.scan(push_pop_ctrl, tf.transpose(push_pop_matrix, [1, 0, 2, 3]),
                                      initializer=depth_prob_init[0])
 
-                depth_prob = tf.cond(step > 1000, lambda: depth_prob, lambda: depth_prob_init)
+                # depth_prob = tf.cond(step > 1000, lambda: depth_prob, lambda: depth_prob_init)
+                #depth_prob = tf.Print(depth_prob, [depth_prob], summarize=30)
 
                 depth_prob_shift = tf.concat([depth_prob_init[:1], depth_prob[:-1]], 0)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
