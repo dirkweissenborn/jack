@@ -325,52 +325,48 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 tf.identity(tf.sigmoid(push_logits), name='push_probs')
                 tf.identity(tf.sigmoid(pop_logits), name='pop_probs')
-                depth = float(shared_resources.config['depth'])
+                depth = shared_resources.config['depth']
 
                 representations.append(inputs)
                 representations.append(ctrl)
 
-                zeros = tf.zeros([tf.shape(inputs)[0], 1])
+                # [B, L, 1] -> [B, L, D, D]
+                push_matrix = tf.tile(tf.expand_dims(push_probs, 3), [1, 1, depth, depth])
+                push_matrix = tf.matrix_band_part(push_matrix, 0, 1)
+                pop_matrix = tf.tile(tf.expand_dims(pop_probs, 3), [1, 1, depth, depth])
+                pop_matrix = tf.matrix_band_part(pop_matrix, 1, 0)
+                push_pop_diag = tf.tile((1.0 - push_probs) * (1.0 - pop_probs), [1, 1, depth])
+                push_pop_matrix = push_matrix + pop_matrix + tf.matrix_diag(push_pop_diag)
 
-                def push_pop_ctrl(acc, input):
-                    push, pop = input
+                def push_pop_ctrl(acc, pp_matrix):
+                    return tf.einsum('ijk,ik->ij', pp_matrix, acc)
 
-                    acc = (push * tf.concat([zeros, acc[:, :-1]], 1) + (1.0 - push) * acc +
-                           push * tf.concat([tf.tile(zeros, [1, int(depth - 1)]), acc[:, -1:]], 1))
+                depth_prob_init = tf.one_hot(
+                    tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32), depth)
 
-                    acc = (pop * tf.concat([acc[:, 1:], zeros], 1) + (1.0 - pop) * acc +
-                           pop * tf.concat([acc[:, :1], tf.tile(zeros, [1, int(depth - 1)])], 1))
-
-                    return acc
-
-                depth_prob_init = tf.one_hot(tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32),
-                                             int(depth))
-
-                depth_prob = tf.cond(step > 2000,
-                                     lambda: tf.scan(
-                                         push_pop_ctrl, (tf.transpose(push_probs, [1, 0, 2]),
-                                                         tf.transpose(pop_probs, [1, 0, 2])),
-                                         initializer=depth_prob_init[0]),
-                                     lambda: depth_prob_init)
+                depth_prob = tf.scan(push_pop_ctrl, tf.transpose(push_pop_matrix, [1, 0, 2, 3]),
+                                     initializer=depth_prob_init[0])
                 depth_prob_shift = tf.concat([depth_prob_init[:1], depth_prob[:-1]], 0)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
                 depth_prob_shift = tf.transpose(depth_prob_shift, [1, 0, 2])
 
                 tf.identity(depth_prob, 'depth_prob')
 
-                segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
-                representations.append(bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs))
                 frames = list()
-                depth_prob_split = tf.split(depth_prob, int(depth), 2)
+                segms = list()
+                depth_prob_split = tf.split(depth_prob, depth, 2)
 
-                depth_prob_shift_split = tf.split(depth_prob_shift, int(depth), 2)
+                depth_prob_shift_split = tf.split(depth_prob_shift, depth, 2)
                 for i, (p, p_shift) in enumerate(zip(depth_prob_split, depth_prob_shift_split)):
-                    with tf.variable_scope('frames', reuse=i > 0):
+                    with tf.variable_scope('segmentation', reuse=i > 0):
                         if i > 0:
                             p += p_shift * pop_probs  # share segment end on pop with lower layer
                         frame_probs = pop_probs * p_shift
-                        frames.append(bow_segm_encoder(segms, length, repr_dim, frame_probs, segm_probs * p))
+                        this_segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs * p)
+                        frames.append(bow_segm_encoder(this_segms, length, repr_dim, frame_probs, segm_probs * p))
+                        segms.append(this_segms)
 
+                representations.append(tf.reduce_sum(tf.stack(segms, 2) * tf.expand_dims(depth_prob, 3), 2))
                 representations.append(tf.reduce_sum(tf.stack(frames, 2) * tf.expand_dims(depth_prob, 3), 2))
 
             return representations
