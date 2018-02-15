@@ -343,26 +343,31 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
 
                     return acc
 
-                depth_prob = tf.one_hot(tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32),
-                                        int(depth))
+                depth_prob_init = tf.one_hot(tf.zeros([tf.shape(inputs)[1], tf.shape(inputs)[0]], dtype=tf.int32),
+                                             int(depth))
 
                 depth_prob = tf.cond(step > 2000,
                                      lambda: tf.scan(
                                          push_pop_ctrl, (tf.transpose(push_probs, [1, 0, 2]),
                                                          tf.transpose(pop_probs, [1, 0, 2])),
-                                         initializer=depth_prob[0]),
-                                     lambda: depth_prob)
+                                         initializer=depth_prob_init[0]),
+                                     lambda: depth_prob_init)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
 
                 tf.identity(depth_prob, 'depth_prob')
 
+                segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
                 representations.append(bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs))
                 frames = list()
-                for p in tf.split(depth_prob, int(depth), 2):
-                    this_segm_probs = segm_probs * p
-                    segms = bow_start_end_segm_encoder(inputs, length, repr_dim, this_segm_probs)
-                    frame_probs = pop_probs * p
-                    frames.append(bow_segm_encoder(segms, length, repr_dim, frame_probs, this_segm_probs))
+                depth_prob_split = tf.split(depth_prob, int(depth), 2)
+                depth_prob_shift = tf.concat([depth_prob_init[0, :, tf.newaxis], depth_prob[:-1]], 1)
+                depth_prob_shift_split = tf.split(depth_prob_shift, int(depth), 2)
+                for i, (p, p_shift) in enumerate(zip(depth_prob_split, depth_prob_shift_split)):
+                    with tf.variable_scope('frames', reuse=i > 0):
+                        if i > 0:
+                            p += p_shift * pop_probs  # share segment end on pop with lower layer
+                        frame_probs = pop_probs * p_shift
+                        frames.append(bow_segm_encoder(segms, length, repr_dim, frame_probs, segm_probs * p))
 
                 representations.append(tf.reduce_sum(tf.stack(frames, 2) * tf.expand_dims(depth_prob, 3), 2))
 
