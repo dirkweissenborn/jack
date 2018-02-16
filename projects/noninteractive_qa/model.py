@@ -309,6 +309,11 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
+                mask = tf.nn.dropout(tf.ones([1, 1, repr_dim]), keep_prob=1.0 - dropout)
+                emb_support, emb_question = tf.cond(tensors.is_eval,
+                                                    lambda: (emb_support, emb_question),
+                                                    lambda: (emb_support * mask, emb_question * mask))
+
         step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
 
         def encoding(inputs, length, reuse=False):
@@ -319,8 +324,9 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 pop_probs, pop_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
                                                                mask=segm_probs)
 
-                push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval,
-                                                                 mask=segm_probs * (1.0 - pop_probs))
+                push_mask = tf.concat([tf.ones([tf.shape(segm_probs)[0], 1, 1]), segm_probs[:, :-1]], 1) * (
+                1.0 - pop_probs)
+                push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval, mask=push_mask)
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 tf.identity(tf.sigmoid(push_logits), name='push_probs')

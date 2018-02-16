@@ -2,7 +2,7 @@ parent_config: './conf/qa/squad/abstract_squad.yaml'
 seed: 1337
 
 repr_dim: 128
-dropout: 0.0
+dropout: 0.2
 epochs: 15
 learning_rate: 0.0005
 
