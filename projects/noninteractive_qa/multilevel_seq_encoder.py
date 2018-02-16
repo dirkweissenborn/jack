@@ -245,6 +245,34 @@ def simple_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_p
     return memory, address_probs, address_logits
 
 
+def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms, ctrl, is_eval):
+    allowed = segm_probs
+    assoc_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots)
+    assoc_logits = tf.cond(is_eval, lambda: assoc_logits, lambda: gumbel_logits(assoc_logits))
+
+    exps = tf.exp(assoc_logits - tf.reduce_max(assoc_logits, axis=1, keep_dims=True))
+    exps = tf.split(exps, num_slots, 2)
+
+    assoc_probs = []
+    frame_contributions = intra_segm_contributions(frame_probs, length)
+    slots = []
+    for i in range(num_slots):
+        potentials = exps[i] * allowed
+        # probs should not be bigger than 1
+        summed = tf.maximum(tf.matmul(frame_contributions, potentials), potentials)
+        if i > 0:
+            summed += tf.exp(tf.get_variable('sentinel_' + str(i), [], tf.float32,
+                                             tf.constant_initializer(-5.0)))
+        probs = potentials / (summed + 1e-20)
+        selected = tf.matmul(frame_contributions, probs * segms)
+        slots.append(selected)
+        # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
+        allowed *= (1.0 - probs)
+        assoc_probs.append(probs)
+
+    return slots, assoc_probs
+
+
 class PropagationCell(tf.nn.rnn_cell.RNNCell):
     def __init__(self, repr_dim):
         self._repr_dim = repr_dim

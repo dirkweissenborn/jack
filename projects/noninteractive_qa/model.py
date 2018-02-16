@@ -14,7 +14,8 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
     left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder, gumbel_logits, intra_segm_contributions, bow_segm_encoder
+    right_segm_sum_contributions, bow_start_end_segm_encoder, bow_segm_encoder, \
+    incremental_assoc_memory_encoder
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -170,33 +171,14 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                             tf.concat([left2_segms, right2_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
                         assoc_ctrl = segms
-                        allowed = segm_probs
 
-                        assoc_logits = tf.layers.dense(tf.layers.dense(assoc_ctrl, repr_dim, tf.nn.relu),
-                                                       shared_resources.config['num_slots'])
-                        assoc_logits = tf.cond(tensors.is_eval, lambda: assoc_logits,
-                                               lambda: gumbel_logits(assoc_logits))
-
-                        exps = tf.exp(assoc_logits - tf.reduce_max(assoc_logits, axis=1, keep_dims=True))
-                        exps = tf.split(exps, shared_resources.config['num_slots'], 2)
-
-                        assoc_probs = []
-                        frame_contributions = intra_segm_contributions(frame_probs, length)
-                        for i in range(shared_resources.config.get('num_slots', 0)):
-                            potentials = exps[i] * allowed
-                            # probs should not be bigger than 1
-                            summed = tf.maximum(tf.matmul(frame_contributions, potentials), potentials)
-                            if i > 0:
-                                summed += tf.exp(tf.get_variable('sentinel_' + str(i), [], tf.float32,
-                                                                 tf.constant_initializer(-5.0)))
-                            probs = potentials / (summed + 1e-20)
-                            selected = tf.matmul(frame_contributions, probs * segms)
-                            selected = tf.cond(step >= 5000, lambda: selected, lambda: tf.stop_gradient(selected))
-                            representations['assoc_' + str(i)] = selected
-                            # assoc_ctrl = tf.concat([assoc_ctrl, selected], 2)
-                            allowed *= (1.0 - probs)
-                            assoc_probs.append(probs)
+                        slots, assoc_probs = incremental_assoc_memory_encoder(
+                            length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
+                            assoc_ctrl, tensors.is_eval)
                         tf.identity(tf.concat(assoc_probs, 2), 'assoc_probs')
+                        for i, selected in enumerate(slots):
+                            representations['assoc_' + str(i)] = tf.cond(
+                                step >= 5000, lambda: selected, lambda: tf.stop_gradient(selected))
 
             return representations, frame_probs, frame_logits, segm_probs, segm_logits
 
@@ -314,7 +296,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                                                     lambda: (emb_support, emb_question),
                                                     lambda: (emb_support * mask, emb_question * mask))
 
-        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+        step = tf.train.get_global_step() or tf.constant(100000, tf.int32)
 
         def encoding(inputs, length, reuse=False):
             representations = list()
@@ -373,17 +355,35 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 depth_prob_split = tf.split(depth_prob, depth, 2)
 
                 depth_prob_shift_split = tf.split(depth_prob_shift, depth, 2)
+
+                num_slots = 1
+                if shared_resources.config.get('assoc', False):
+                    num_slots = shared_resources.config['num_slots']
+
                 for i, (p, p_shift) in enumerate(zip(depth_prob_split, depth_prob_shift_split)):
                     with tf.variable_scope('segmentation', reuse=i > 0):
                         frame_probs = pop_probs * p_shift
                         if i > 0:
                             p += frame_probs  # share segment end on pop with lower layer
-                        this_segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs * p)
-                        frames.append(bow_segm_encoder(this_segms, length, repr_dim, frame_probs, segm_probs * p))
+                        this_segm_probs = segm_probs * p
+                        this_segms = bow_start_end_segm_encoder(inputs, length, repr_dim, this_segm_probs)
+                        if shared_resources.config.get('assoc', False):
+                            slots, assoc_probs = incremental_assoc_memory_encoder(
+                                length, repr_dim, shared_resources.config['num_slots'], frame_probs,
+                                this_segm_probs, this_segms, this_segms, tensors.is_eval)
+                            tf.identity(tf.concat(assoc_probs, 2), 'assoc_probs_' + str(i))
+                        else:
+                            slots = [bow_segm_encoder(this_segms, length, repr_dim, frame_probs, this_segm_probs)]
+                        frames.append(tf.stack(slots, 2))
                         segms.append(this_segms)
 
                 representations.append(tf.reduce_sum(tf.stack(segms, 2) * tf.expand_dims(depth_prob, 3), 2))
-                representations.append(tf.reduce_sum(tf.stack(frames, 2) * tf.expand_dims(depth_prob, 3), 2))
+                frames = tf.reduce_sum(tf.stack(frames, 2) * depth_prob[:, :, :, tf.newaxis, tf.newaxis], 2)
+                frames = tf.cond(step >= 5000, lambda: frames, lambda: tf.stop_gradient(frames))
+                if num_slots > 1:
+                    representations.extend(tf.squeeze(f, 2) for f in tf.split(frames, num_slots, 2))
+                else:
+                    representations.append(tf.squeeze(frames, 2))
 
             return representations
 
