@@ -139,7 +139,10 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None)
     seq_as_start *= segm_starts
     seq_as_end *= segm_ends
 
-    segment_reps = bow_mean + tf.matmul(segm_contributions, seq_as_end) + tf.matmul(segm_contributions, seq_as_start)
+    seq_as_start = tf.matmul(segm_contributions, seq_as_start)
+    seq_as_end = tf.matmul(segm_contributions, seq_as_end)
+
+    segment_reps = bow_mean + seq_as_end + seq_as_start
 
     return segment_reps
 
@@ -215,9 +218,23 @@ def assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, s
         r = tf.range(0, end)
         address_probs = tf.cond(end > 0, lambda: tf.scan(iteration, r, address_probs)[-1], lambda: address_probs)
 
-    tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
+    memory = tf.matmul(frame_contributions, memory)
+
+    return memory, address_probs
+
+
+def softmax_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms, ctrl, is_eval):
+    address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots, use_bias=False)
+    address_probs = tf.cond(is_eval, lambda: tf.one_hot(tf.argmax(address_logits, -1), num_slots),
+                            lambda: gumbel_softmax(address_logits))
+    address_probs *= segm_probs  # put zero probability on non segment ends
+
+    memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
+    memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
+
+    frame_contributions = intra_segm_contributions(frame_probs, length)
     memory = tf.matmul(frame_contributions, memory)
 
     return memory, address_probs, address_logits
@@ -237,12 +254,11 @@ def simple_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_p
 
     address_probs = potentials / row_sum * potentials / column_sum
 
-    tf.identity(address_probs, name='address_probs')
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
     memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
     memory = tf.matmul(frame_contributions, memory)
 
-    return memory, address_probs, address_logits
+    return memory, address_probs
 
 
 def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms, ctrl, is_eval):

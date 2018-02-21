@@ -9,13 +9,9 @@ from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
-from jack.tfutil.modular_encoder import modular_encoder
 from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
-from projects.noninteractive_qa.multilevel_seq_encoder import assoc_memory_encoder, edge_detection_encoder, \
-    left_segm_sum_contributions, \
-    right_segm_sum_contributions, bow_start_end_segm_encoder, bow_segm_encoder, \
-    incremental_assoc_memory_encoder
+from projects.noninteractive_qa.multilevel_seq_encoder import *
 
 
 class NonInteractiveModularQAModule(AbstractXQAModelModule):
@@ -127,6 +123,11 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
+                all_words = tf.reshape(tf.concat([tensors.question_words, tensors.support_words], 1), [-1])
+                all_embeddings = tf.unsorted_segment_max(
+                    tf.reshape(tf.concat([emb_question, emb_support], 1), [-1, repr_dim]), all_words,
+                    tf.reduce_max(all_words) + 1)
+
                 mask = tf.nn.dropout(tf.ones([1, 1, repr_dim]), keep_prob=1.0 - dropout)
                 emb_support, emb_question = tf.cond(tensors.is_eval,
                                                     lambda: (emb_support, emb_question),
@@ -134,7 +135,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
         step = tf.train.get_global_step() or tf.constant(100000, tf.int32)
 
-        def encoding(inputs, length, reuse=False):
+        def encoding(inputs, length, input_words, reuse=False, regularize=False):
             with tf.variable_scope("encoding", reuse=reuse):
                 with tf.variable_scope("controller"):
                     controller_out = modular_encoder(
@@ -142,20 +143,17 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         {'text': inputs}, {'text': length}, {},
                         repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
-                representations = {"ctrl": controller_out}
-
                 segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval)
+                tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 frame_probs, frame_logits = edge_detection_encoder(
                     controller_out, repr_dim, tensors.is_eval, mask=segm_probs)
-
-                tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 tf.identity(tf.sigmoid(frame_logits), name='frame_probs')
 
                 with tf.variable_scope("representations"):
-                    representations['word'] = inputs
                     segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
-                    representations['segm'] = segms
-
+                    frames = bow_segm_encoder(segms, length, repr_dim, frame_probs, mask=segm_probs)
+                    slots = []
+                    selected = None
                     if 'assoc' in shared_resources.config['prediction_levels']:
                         left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
                         right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
@@ -170,67 +168,86 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         assoc_ctrl = assoc_ctrl + tf.layers.dense(
                             tf.concat([left2_segms, right2_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu)
+                        # frame_probs, frame_logits = edge_detection_encoder(
+                        #    assoc_ctrl, repr_dim, tensors.is_eval, mask=segm_probs)
+                        # tf.identity(tf.sigmoid(frame_logits), name='frame_probs')
                         assoc_ctrl = segms
 
-                        slots, assoc_probs = incremental_assoc_memory_encoder(
+                        memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
                             assoc_ctrl, tensors.is_eval)
-                        tf.identity(tf.concat(assoc_probs, 2), 'assoc_probs')
-                        for i, selected in enumerate(slots):
-                            representations['assoc_' + str(i)] = tf.cond(
-                                step >= 5000, lambda: selected, lambda: tf.stop_gradient(selected))
+                        # [B, L, N, S], [B, L, N] -> [B, L, S]
+                        selected = tf.einsum('abcd,abc->abd', memory, assoc_probs)
 
-            return representations, frame_probs, frame_logits, segm_probs, segm_logits
+                        slots = tf.split(memory, shared_resources.config['num_slots'], 2)
 
-        encoded_question, q_boundary_probs, q_boundary_logits, q_segm_probs, q_segm_logits = encoding(
-            emb_question, tensors.question_length)
-        encoded_support, s_boundary_probs, s_boundary_logits, s_segm_probs, s_segm_logits = encoding(
-            emb_support, tensors.support_length, True)
+                        tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
+                        if regularize:
+                            losses = []
+                            mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+                            segm_contribs = intra_segm_contributions(segm_probs, length)
+                            individual_assoc_probs = tf.matmul(segm_contribs, assoc_probs)
+                            for i, selected in enumerate(slots):
+                                logits = tf.matmul(
+                                    tf.layers.dense(tf.reshape(selected, [-1, repr_dim]), repr_dim, tf.tanh),
+                                    all_embeddings, transpose_b=True)
+                                losses.append(
+                                    tf.losses.sparse_softmax_cross_entropy(
+                                        tf.reshape(input_words, [-1]), logits,
+                                        weights=tf.reshape(individual_assoc_probs[:, :, i], [-1]),
+                                        loss_collection=None, reduction=tf.losses.Reduction.NONE))
+                            losses = tf.add_n(losses)
 
-        # enforce no boundary in question
-        # q_mask = tf.expand_dims(tf.sequence_mask(tensors.question_length - 1, dtype=tf.float32), 2)
-        # tf.add_to_collection(
-        #   tf.GraphKeys.LOSSES,
-        #   shared_resources.config.get('lambda_boundary', 0.0) *
-        #   tf.reduce_mean(
-        #       tf.reduce_sum(q_boundary_probs[:, 1:] * q_mask, reduction_indices=[1, 2]) -
-        #       tf.reduce_sum(q_boundary_probs[:, 0], 1)
-        #   ))
+                            tf.add_to_collection(tf.GraphKeys.LOSSES, 0.1 * tf.reduce_mean(mask * losses))
+
+            return controller_out, segms, frames, selected, slots, frame_probs, segm_probs
+
+        s_ngram, s_segms, s_frames, s_selected, s_slots, s_boundary_probs, s_segm_probs = encoding(
+            emb_support, tensors.support_length, tensors.support_words, regularize=True)
+        q_ngram, q_segms, q_frames, q_selected, q_slots, q_boundary_probs, q_segm_probs = encoding(
+            emb_question, tensors.question_length, tensors.question_words, True)
+
+        # computing single time attention over question
+        question_attention_weights = compute_question_weights(q_ngram, tensors.question_length)
+        support_mask = misc.mask_for_lengths(tensors.support_length)
+
+        def score(q, s, name):
+            with tf.variable_scope(name) as vs:
+                q = tf.reduce_sum(question_attention_weights * q, 1)
+                q = tf.gather(q, tensors.support2question)
+                question_hidden = tf.layers.dense(q, repr_dim, tf.nn.relu, name="hidden")
+                vs.reuse_variables()
+                hidden = tf.layers.dense(s, repr_dim, tf.nn.relu, name="hidden")
+                scores = tf.einsum('ik,ijk->ij', question_hidden, hidden)
+                return scores
 
         all_start_scores = []
         all_end_scores = []
-        # computing single time attention over question
-        prediction_levels = [k for k in encoded_question if
-                             any(k.startswith(k2) for k2 in shared_resources.config['prediction_levels'])]
-        prefix_count = {k2: sum(k.startswith(k2) for k in prediction_levels)
-                        for k2 in shared_resources.config['prediction_levels']}
-        full_encoded_question = [encoded_question[k] for k in prediction_levels]
-        full_encoded_question_splits = [q.get_shape()[2].value for q in full_encoded_question]
-        question_attention_weights = compute_question_weights(
-            tf.concat([encoded_question['word'], encoded_question['ctrl']], 2), tensors.question_length)
-        question_state = tf.reduce_sum(question_attention_weights * tf.concat(full_encoded_question, 2), 1)
-        question_state = tf.gather(question_state, tensors.support2question)
-        question_state = tf.split(question_state, full_encoded_question_splits, 1)
-        for q, k in zip(question_state, prediction_levels):
-            with tf.variable_scope(k) as vs:
-                question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
-                question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
-                vs.reuse_variables()
-                hidden = tf.layers.dense(encoded_support[k], 2 * repr_dim, tf.nn.relu, name="hidden")
-                hidden_start, hidden_end = tf.split(hidden, 2, 2)
-                support_mask = misc.mask_for_lengths(tensors.support_length)
-                start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
-                start_scores = start_scores + support_mask
-                end_scores = tf.einsum('ik,ijk->ij', question_hidden_end, hidden_end)
-                end_scores = end_scores + support_mask
+        if 'word' in shared_resources.config['prediction_levels']:
+            all_start_scores.append(score(emb_question, emb_support, 'start_word_score'))
+            all_end_scores.append(score(emb_question, emb_support, 'end_word_score'))
+        if 'ngram' in shared_resources.config['prediction_levels']:
+            all_start_scores.append(score(q_ngram, s_ngram, 'start_ngram_score'))
+            all_end_scores.append(score(q_ngram, s_ngram, 'end_ngram_score'))
+        if 'segm' in shared_resources.config['prediction_levels']:
+            all_start_scores.append(score(q_segms, s_segms, 'start_segm_score'))
+            all_end_scores.append(score(q_segms, s_segms, 'end_segm_score'))
+        if 'frame' in shared_resources.config['prediction_levels']:
+            frames = score(q_frames, s_frames, 'frames_score')
+            all_start_scores.append(frames)
+            all_end_scores.append(frames)
 
-                prefix_ct = list(prefix_count[k2] for k2 in shared_resources.config['prediction_levels']
-                                 if k.startswith(k2))[0]
-                all_start_scores.append(start_scores / prefix_ct)
-                all_end_scores.append(end_scores / prefix_ct)
+        if 'assoc' in shared_resources.config['prediction_levels']:
+            all_start_scores.append(score(q_selected, s_selected, 'start_selected_score'))
+            all_end_scores.append(score(q_selected, s_selected, 'end_selected_score'))
+            assoc_scores = tf.add_n(
+                [score(q, s, 'assoc_' + str(i)) for i, (q, s) in enumerate(zip(q_slots, s_slots))]) / len(q_slots)
+            all_start_scores.append(assoc_scores)
+            all_end_scores.append(assoc_scores)
 
         start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
-            compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
+            compute_spans(tf.add_n(all_start_scores) + support_mask, tf.add_n(all_end_scores) + support_mask,
+                          tensors.answer2support, tensors.is_eval,
                           tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
@@ -307,7 +324,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                                                                mask=segm_probs)
 
                 push_mask = tf.concat([tf.ones([tf.shape(segm_probs)[0], 1, 1]), segm_probs[:, :-1]], 1) * (
-                1.0 - pop_probs)
+                    1.0 - pop_probs)
                 push_probs, push_logits = edge_detection_encoder(ctrl, repr_dim, tensors.is_eval, mask=push_mask)
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
@@ -342,7 +359,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                                      initializer=depth_prob_init[0])
 
                 # depth_prob = tf.cond(step > 1000, lambda: depth_prob, lambda: depth_prob_init)
-                #depth_prob = tf.Print(depth_prob, [depth_prob], summarize=30)
+                # depth_prob = tf.Print(depth_prob, [depth_prob], summarize=30)
 
                 depth_prob_shift = tf.concat([depth_prob_init[:1], depth_prob[:-1]], 0)
                 depth_prob = tf.transpose(depth_prob, [1, 0, 2])
