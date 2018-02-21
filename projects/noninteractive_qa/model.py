@@ -176,9 +176,10 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
                             length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
                             assoc_ctrl, tensors.is_eval)
-                        # [B, L, N, S], [B, L, N] -> [B, L, S]
-                        selected = tf.einsum('abcd,abc->abd', memory, assoc_probs)
-
+                        # [B, L, N], [B, L, N * S] -> [B, L, S]
+                        selected = tf.squeeze(tf.matmul(
+                            tf.expand_dims(assoc_probs, 2), tf.reshape(
+                                memory, [-1, tf.shape(memory)[1], shared_resources.config['num_slots'], repr_dim])), 2)
                         slots = tf.split(memory, shared_resources.config['num_slots'], 2)
 
                         tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
