@@ -10,7 +10,7 @@ reader: 'multi_level_noninteractive_qa_reader'
 name: 'multi_level_noninteractive_qa_reader'
 
 
-prediction_levels: ['word', 'nhgram', 'segm', 'frame', 'assoc']
+prediction_levels: ['word', 'ngram', 'segm', 'frame', 'assoc']
 
 num_slots: 5
 
