@@ -239,8 +239,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
             all_end_scores.append(frames)
 
         if 'assoc' in shared_resources.config['prediction_levels']:
-            all_start_scores.append(score(q_selected, s_selected, 'start_selected_score'))
-            all_end_scores.append(score(q_selected, s_selected, 'end_selected_score'))
+            selected_score = score(q_selected, s_selected, 'selected_score')
+            all_start_scores.append(selected_score)
+            all_end_scores.append(selected_score)
             assoc_scores = tf.add_n(
                 [score(q, s, 'assoc_' + str(i)) for i, (q, s) in enumerate(zip(q_slots, s_slots))]) / len(q_slots)
             all_start_scores.append(assoc_scores)
