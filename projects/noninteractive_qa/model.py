@@ -177,25 +177,25 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
                         if regularize:
                             losses = []
-                            mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+                            weights = tf.sequence_mask(length, dtype=tf.float32)
                             memory_reshaped = tf.reshape(
                                 memory, [-1, tf.shape(memory)[1], shared_resources.config['num_slots'], repr_dim])
-                            selected_slot = tf.squeeze(tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped, 2))
+                            selected_slot = tf.squeeze(tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped), 2)
                             logits = tf.matmul(
                                 tf.layers.dense(tf.reshape(selected_slot, [-1, repr_dim]), repr_dim, tf.tanh),
                                 all_embeddings, transpose_b=True)
                             losses.append(
                                 tf.losses.sparse_softmax_cross_entropy(
-                                    tf.reshape(input_words, [-1]), logits, weights=mask,
+                                    tf.reshape(input_words, [-1]), logits, weights=tf.reshape(weights, [-1]),
                                     loss_collection=None, reduction=tf.losses.Reduction.NONE))
-                            losses = tf.add_n(losses)
+                            losses = tf.reshape(tf.add_n(losses), tf.shape(weights))
                             tf.add_to_collection(tf.GraphKeys.LOSSES,
                                                  0.03 * tf.reduce_mean(tf.reduce_sum(losses, 1) / tf.to_float(length)))
 
             return controller_out, segms, frames, slots, frame_probs, segm_probs
 
         s_ngram, s_segms, s_frames, s_slots, s_boundary_probs, s_segm_probs = encoding(
-            emb_support, tensors.support_length, tensors.support_words, regularize=False)
+            emb_support, tensors.support_length, tensors.support_words, regularize=True)
         q_ngram, q_segms, q_frames, q_slots, q_boundary_probs, q_segm_probs = encoding(
             emb_question, tensors.question_length, tensors.question_words, True)
 
