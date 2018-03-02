@@ -152,7 +152,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 with tf.variable_scope("representations"):
                     segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
                     frames, frame_attn = weighted_bow_segm_encoder(
-                        segms, length, repr_dim, frame_probs, mask=segm_probs)
+                        segms, length, repr_dim, frame_probs, tensors.is_eval, mask=segm_probs, hard=True)
                     tf.identity(frame_attn, name='frame_attn')
                     slots = []
                     if 'assoc' in shared_resources.config['prediction_levels']:
@@ -195,7 +195,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
             return controller_out, segms, frames, slots, frame_probs, segm_probs
 
         s_ngram, s_segms, s_frames, s_slots, s_boundary_probs, s_segm_probs = encoding(
-            emb_support, tensors.support_length, tensors.support_words, regularize=True)
+            emb_support, tensors.support_length, tensors.support_words, regularize=False)
         q_ngram, q_segms, q_frames, q_slots, q_boundary_probs, q_segm_probs = encoding(
             emb_question, tensors.question_length, tensors.question_words, True)
 
