@@ -154,7 +154,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     frame, slots = None, []
 
                     if 'frame' in shared_resources.config['prediction_levels']:
-                        frame = bow_segm_encoder(inputs, length, repr_dim, segm_probs, segm_probs, True, False)
+                        frame = weighted_bow_segm_encoder(inputs, length, repr_dim, frame_probs, segm_probs)
 
                         if 'assoc' in shared_resources.config['prediction_levels']:
                             left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
