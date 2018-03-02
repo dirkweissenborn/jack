@@ -164,17 +164,17 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         frame_ctrl = tf.layers.dense(
                             tf.concat([left_segms, left2_segms, right_segms, right2_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
-                        frame_ctrl = tf.concat([segms, frame_ctrl], 2)
+                        ctrl = tf.concat([segms, frame_ctrl], 2)
                         governor, frame_attn, _ = segment_selection_encoder(
-                            length, repr_dim, frame_probs, segm_probs, segms, frame_ctrl, tensors.is_eval)
+                            length, repr_dim, frame_probs, segm_probs, segms, ctrl, tensors.is_eval)
                         tf.identity(frame_attn, name='frame_attn')
 
                         if 'assoc' in shared_resources.config['prediction_levels']:
-                            frame_ctrl = tf.concat([segms, frame_ctrl, governor], 2)
+                            ctrl = tf.concat([segms, frame_ctrl, governor], 2)
 
                             memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
                                 length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
-                                frame_ctrl, tensors.is_eval)
+                                ctrl, tensors.is_eval)
                             # [B, L, N], [B, L, N * S] -> [B, L, S]
                             slots = tf.split(memory, shared_resources.config['num_slots'], 2)
 
