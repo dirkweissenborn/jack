@@ -5,19 +5,19 @@ from jack.tfutil.modular_encoder import modular_encoder
 
 
 def gumbel_softmax(logits):
-    step = tf.train.get_global_step()
-    if step is not None:
-        step = tf.to_float(step)
-        logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
+    # step = tf.train.get_global_step()
+    # if step is not None:
+    #    step = tf.to_float(step)
+    #    logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
     dist = tf.contrib.distributions.RelaxedOneHotCategorical(0.5, logits=logits)
     return dist.sample()
 
 
 def gumbel_sigmoid(logits):
-    step = tf.train.get_global_step()
-    if step is not None:
-        step = tf.to_float(step)
-        logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
+    # step = tf.train.get_global_step()
+    # if step is not None:
+    #    step = tf.to_float(step)
+    #    logits /= tf.maximum(10.0 * tf.exp(-step / 1000), 1.0)
     dist = tf.contrib.distributions.RelaxedBernoulli(0.5, logits=logits)
     return dist.sample()
 
@@ -44,12 +44,11 @@ def intra_segm_contributions(segm_probs, length):
     mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
     log_keep *= mask
     # [B, L, 1]
-    revcum_log_keep = tf.cumsum(log_keep, 1, reverse=True)
     cum_log_keep = tf.cumsum(log_keep, 1, exclusive=True)
 
     # [B, L, L]
     contributions_fw = cum_log_keep - tf.transpose(cum_log_keep, [0, 2, 1])
-    contributions_bw = revcum_log_keep - tf.transpose(revcum_log_keep, [0, 2, 1])
+    contributions_bw = tf.transpose(contributions_fw, [0, 2, 1])
     contributions = tf.exp(tf.maximum(tf.minimum(contributions_fw, contributions_bw), -20.0))
     contributions *= mask
     contributions *= tf.reshape(mask, [-1, 1, tf.shape(mask)[1]])
@@ -109,23 +108,39 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
     return controller_out
 
 
-def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
+def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize=False):
     seq_transformed = tf.layers.dense(sequence, repr_dim, tf.nn.relu)
 
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
         segm_contributions *= tf.transpose(mask, [0, 2, 1])
 
-    bow_sum = tf.matmul(segm_contributions, seq_transformed)
-    bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
-    segment_reps = bow_sum / (bow_num + 1e-6)
+    segment_reps = tf.matmul(segm_contributions, seq_transformed)
+    if normalize:
+        bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
+        segment_reps /= (bow_num + 1e-6)
 
     return segment_reps
 
 
+def weighted_bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
+    logits = tf.layers.dense(sequence, 1, None)
+    potentials = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
+    if mask is not None:
+        potentials *= mask  # put zero probability on non segment ends
+    contributions = intra_segm_contributions(segm_ends, length)
+    row_sum = tf.maximum(tf.matmul(contributions, potentials), potentials) + 1e-8
+
+    probs = potentials / row_sum
+    weighted_segm = probs * sequence
+    weighted_segm = tf.matmul(contributions, weighted_segm)
+
+    return weighted_segm, probs
+
+
 def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
     seq_as_start, seq_as_end, seq_transformed = tf.split(
-        tf.layers.dense(sequence, 3 * repr_dim, tf.nn.relu), 3, 2)
+        tf.layers.dense(sequence, 3 * repr_dim), 3, 2)
 
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
@@ -142,9 +157,18 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None)
     seq_as_start = tf.matmul(segm_contributions, seq_as_start)
     seq_as_end = tf.matmul(segm_contributions, seq_as_end)
 
-    segment_reps = bow_mean + seq_as_end + seq_as_start
+    segment_reps = tf.nn.relu(bow_mean + seq_as_end + seq_as_start)
 
     return segment_reps
+
+
+def conv_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
+    padded_sequence = tf.pad(sequence, [[0, 0], [1, 1], [0, 0]])
+    padded_segm_ends = tf.pad(segm_ends, [[0, 0], [2, 0], [0, 0]], constant_values=1.0)
+    right = padded_sequence[:, 2:] * (1.0 - segm_ends)
+    left = (padded_sequence * (1.0 - padded_segm_ends))[:, :-2]
+    conv = tf.concat([sequence, right, left], 2)
+    return bow_start_end_segm_encoder(conv, length, repr_dim, segm_ends, mask)
 
 
 def segmentation_encoder(sequence, length, repr_dim, segm_ends):
@@ -229,6 +253,21 @@ def softmax_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_
     address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots, use_bias=False)
     address_probs = tf.cond(is_eval, lambda: tf.one_hot(tf.argmax(address_logits, -1), num_slots),
                             lambda: gumbel_softmax(address_logits))
+    address_probs *= segm_probs  # put zero probability on non segment ends
+
+    memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
+    memory = tf.reshape(memory, [tf.shape(memory)[0], tf.shape(memory)[1], num_slots * segms.get_shape()[-1].value])
+
+    frame_contributions = intra_segm_contributions(frame_probs, length)
+    memory = tf.matmul(frame_contributions, memory)
+
+    return memory, address_probs, address_logits
+
+
+def sigmoid_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, segm_probs, segms, ctrl, is_eval):
+    address_logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), num_slots)
+    address_probs = tf.cond(is_eval, lambda: tf.round(tf.sigmoid(address_logits)),
+                            lambda: gumbel_sigmoid(address_logits))
     address_probs *= segm_probs  # put zero probability on non segment ends
 
     memory = tf.expand_dims(address_probs, 3) * tf.expand_dims(segms, 2)
