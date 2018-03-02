@@ -164,7 +164,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         left2_segms = tf.matmul(left_segm_contribs, left_segms)
                         right2_segms = tf.matmul(right_segm_contribs, right_segms)
                         assoc_ctrl = tf.layers.dense(
-                            tf.concat([left_segms, left2_segms, segms, right_segms, right2_segms], 2),
+                            tf.concat([left_segms, left2_segms, right_segms, right2_segms, frames], 2),
                             segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
                         assoc_ctrl = tf.concat([segms, assoc_ctrl], 2)
 
