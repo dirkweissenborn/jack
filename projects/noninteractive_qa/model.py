@@ -151,26 +151,23 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                 with tf.variable_scope("representations"):
                     segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
-                    governor, slots = None, []
+                    frame, slots = None, []
 
                     if 'frame' in shared_resources.config['prediction_levels']:
-                        left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
-                        right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
-
-                        left_segms = tf.matmul(left_segm_contribs, segms)
-                        right_segms = tf.matmul(right_segm_contribs, segms)
-                        left2_segms = tf.matmul(left_segm_contribs, left_segms)
-                        right2_segms = tf.matmul(right_segm_contribs, right_segms)
-                        frame_ctrl = tf.layers.dense(
-                            tf.concat([left_segms, left2_segms, right_segms, right2_segms], 2),
-                            segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
-                        ctrl = tf.concat([segms, frame_ctrl], 2)
-                        governor, frame_attn, _ = segment_selection_encoder(
-                            length, repr_dim, frame_probs, segm_probs, segms, ctrl, tensors.is_eval)
-                        tf.identity(frame_attn, name='frame_attn')
+                        frame = bow_segm_encoder(inputs, length, repr_dim, segm_probs, segm_probs, True, False)
 
                         if 'assoc' in shared_resources.config['prediction_levels']:
-                            ctrl = tf.concat([segms, frame_ctrl, governor], 2)
+                            left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
+                            right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
+
+                            left_segms = tf.matmul(left_segm_contribs, segms)
+                            right_segms = tf.matmul(right_segm_contribs, segms)
+                            left2_segms = tf.matmul(left_segm_contribs, left_segms)
+                            right2_segms = tf.matmul(right_segm_contribs, right_segms)
+                            frame_ctrl = tf.layers.dense(
+                                tf.concat([left_segms, left2_segms, right_segms, right2_segms], 2),
+                                segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
+                            ctrl = tf.concat([segms, frame_ctrl, frame], 2)
 
                             memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
                                 length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
@@ -198,10 +195,10 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                                                      0.03 * tf.reduce_mean(
                                                          tf.reduce_sum(losses, 1) / tf.to_float(length)))
 
-            return controller_out, segms, governor, slots, frame_probs, segm_probs
+            return controller_out, segms, frame, slots, frame_probs, segm_probs
 
         s_ngram, s_segms, s_frames, s_slots, s_boundary_probs, s_segm_probs = encoding(
-            emb_support, tensors.support_length, tensors.support_words, regularize=False)
+            emb_support, tensors.support_length, tensors.support_words, regularize=True)
         q_ngram, q_segms, q_frames, q_slots, q_boundary_probs, q_segm_probs = encoding(
             emb_question, tensors.question_length, tensors.question_words, True)
 
