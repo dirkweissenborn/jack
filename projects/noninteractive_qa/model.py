@@ -186,10 +186,11 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                                 all_embeddings, transpose_b=True)
                             losses.append(
                                 tf.losses.sparse_softmax_cross_entropy(
-                                    tf.reshape(input_words, [-1]), logits,
+                                    tf.reshape(input_words, [-1]), logits, weights=mask,
                                     loss_collection=None, reduction=tf.losses.Reduction.NONE))
                             losses = tf.add_n(losses)
-                            tf.add_to_collection(tf.GraphKeys.LOSSES, 0.03 * tf.reduce_mean(mask * losses))
+                            tf.add_to_collection(tf.GraphKeys.LOSSES,
+                                                 0.03 * tf.reduce_mean(tf.reduce_sum(losses, 1) / tf.to_float(length)))
 
             return controller_out, segms, frames, slots, frame_probs, segm_probs
 
