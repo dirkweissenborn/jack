@@ -151,11 +151,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
                 with tf.variable_scope("representations"):
                     segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
-                    frames, frame_attn = weighted_bow_segm_encoder(
-                        segms, length, repr_dim, frame_probs, tensors.is_eval, mask=segm_probs, hard=True)
-                    tf.identity(frame_attn, name='frame_attn')
-                    slots = []
-                    if 'assoc' in shared_resources.config['prediction_levels']:
+                    governor, slots = None, []
+
+                    if 'frame' in shared_resources.config['prediction_levels']:
                         left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
                         right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
 
@@ -163,36 +161,44 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         right_segms = tf.matmul(right_segm_contribs, segms)
                         left2_segms = tf.matmul(left_segm_contribs, left_segms)
                         right2_segms = tf.matmul(right_segm_contribs, right_segms)
-                        assoc_ctrl = tf.layers.dense(
-                            tf.concat([left_segms, left2_segms, right_segms, right2_segms, frames], 2),
+                        frame_ctrl = tf.layers.dense(
+                            tf.concat([left_segms, left2_segms, right_segms, right2_segms], 2),
                             segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
-                        assoc_ctrl = tf.concat([segms, assoc_ctrl], 2)
+                        frame_ctrl = tf.concat([segms, frame_ctrl], 2)
+                        governor, frame_attn, _ = segment_selection_encoder(
+                            length, repr_dim, frame_probs, segm_probs, segms, frame_ctrl, tensors.is_eval)
+                        tf.identity(frame_attn, name='frame_attn')
 
-                        memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
-                            length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
-                            assoc_ctrl, tensors.is_eval)
-                        # [B, L, N], [B, L, N * S] -> [B, L, S]
-                        slots = tf.split(memory, shared_resources.config['num_slots'], 2)
+                        if 'assoc' in shared_resources.config['prediction_levels']:
+                            frame_ctrl = tf.concat([segms, frame_ctrl, governor], 2)
 
-                        tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
-                        if regularize:
-                            losses = []
-                            weights = tf.sequence_mask(length, dtype=tf.float32)
-                            memory_reshaped = tf.reshape(
-                                memory, [-1, tf.shape(memory)[1], shared_resources.config['num_slots'], repr_dim])
-                            selected_slot = tf.squeeze(tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped), 2)
-                            logits = tf.matmul(
-                                tf.layers.dense(tf.reshape(selected_slot, [-1, repr_dim]), repr_dim, tf.tanh),
-                                all_embeddings, transpose_b=True)
-                            losses.append(
-                                tf.losses.sparse_softmax_cross_entropy(
-                                    tf.reshape(input_words, [-1]), logits, weights=tf.reshape(weights, [-1]),
-                                    loss_collection=None, reduction=tf.losses.Reduction.NONE))
-                            losses = tf.reshape(tf.add_n(losses), tf.shape(weights))
-                            tf.add_to_collection(tf.GraphKeys.LOSSES,
-                                                 0.03 * tf.reduce_mean(tf.reduce_sum(losses, 1) / tf.to_float(length)))
+                            memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
+                                length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
+                                frame_ctrl, tensors.is_eval)
+                            # [B, L, N], [B, L, N * S] -> [B, L, S]
+                            slots = tf.split(memory, shared_resources.config['num_slots'], 2)
 
-            return controller_out, segms, frames, slots, frame_probs, segm_probs
+                            tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
+                            if regularize:
+                                losses = []
+                                weights = tf.sequence_mask(length, dtype=tf.float32)
+                                memory_reshaped = tf.reshape(
+                                    memory, [-1, tf.shape(memory)[1], shared_resources.config['num_slots'], repr_dim])
+                                selected_slot = tf.squeeze(tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped),
+                                                           2)
+                                logits = tf.matmul(
+                                    tf.layers.dense(tf.reshape(selected_slot, [-1, repr_dim]), repr_dim, tf.tanh),
+                                    all_embeddings, transpose_b=True)
+                                losses.append(
+                                    tf.losses.sparse_softmax_cross_entropy(
+                                        tf.reshape(input_words, [-1]), logits, weights=tf.reshape(weights, [-1]),
+                                        loss_collection=None, reduction=tf.losses.Reduction.NONE))
+                                losses = tf.reshape(tf.add_n(losses), tf.shape(weights))
+                                tf.add_to_collection(tf.GraphKeys.LOSSES,
+                                                     0.03 * tf.reduce_mean(
+                                                         tf.reduce_sum(losses, 1) / tf.to_float(length)))
+
+            return controller_out, segms, governor, slots, frame_probs, segm_probs
 
         s_ngram, s_segms, s_frames, s_slots, s_boundary_probs, s_segm_probs = encoding(
             emb_support, tensors.support_length, tensors.support_words, regularize=False)

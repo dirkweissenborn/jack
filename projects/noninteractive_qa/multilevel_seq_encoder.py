@@ -123,13 +123,9 @@ def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize
     return segment_reps
 
 
-def weighted_bow_segm_encoder(sequence, length, repr_dim, segm_ends, is_eval, mask=None, hard=False):
+def weighted_bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
     logits = tf.layers.dense(sequence, 1, None)
-    logits -= tf.reduce_max(logits, axis=1, keep_dims=True)
-    if hard:
-        logits = tf.cond(is_eval, lambda: 100.0 * logits, lambda: gumbel_logits(logits))
-
-    potentials = tf.exp(logits)
+    potentials = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
     if mask is not None:
         potentials *= mask  # put zero probability on non segment ends
     contributions = intra_segm_contributions(segm_ends, length)
@@ -202,7 +198,7 @@ def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
 
 def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, ctrl, is_eval, with_sentinel=False):
     logits = tf.layers.dense(tf.layers.dense(ctrl, repr_dim, tf.nn.relu), 1)
-    logits = tf.cond(is_eval, lambda: logits, lambda: gumbel_logits(logits))
+    logits = tf.cond(is_eval, lambda: 100.0 * logits, lambda: gumbel_logits(logits))
 
     exps = tf.exp(logits - tf.reduce_max(logits, axis=1, keep_dims=True))
     exps *= segm_probs
