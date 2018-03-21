@@ -144,62 +144,63 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
                 segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval)
+                segm_probs_stop = tf.stop_gradient(segm_probs)
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 frame_probs, frame_logits = edge_detection_encoder(
                     controller_out, repr_dim, tensors.is_eval, mask=segm_probs)
                 tf.identity(tf.sigmoid(frame_logits), name='frame_probs')
 
                 with tf.variable_scope("representations"):
-                    segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
+                    with tf.variable_scope("phrase") as vs:
+                        segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
+                        vs.reuse_vraiables()
+                        segms_stop = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs_stop)
+
                     frame, slots = None, []
 
                     if 'frame' in shared_resources.config['prediction_levels']:
-                        frame, probs = weighted_bow_segm_encoder(inputs, length, repr_dim, frame_probs, segm_probs)
+                        frame, probs = weighted_bow_segm_encoder(inputs, length, repr_dim, frame_probs, segm_probs_stop)
                         tf.identity(probs, 'frame_attn')
 
                         if 'assoc' in shared_resources.config['prediction_levels']:
-                            left_segm_contribs = left_segm_sum_contributions(segm_probs, length)
-                            right_segm_contribs = right_segm_sum_contributions(segm_probs, length)
+                            left_segm_contribs = left_segm_sum_contributions(segm_probs_stop, length)
+                            right_segm_contribs = right_segm_sum_contributions(segm_probs_stop, length)
 
-                            left_segms = tf.matmul(left_segm_contribs, segms)
-                            right_segms = tf.matmul(right_segm_contribs, segms)
+                            left_segms = tf.matmul(left_segm_contribs, segms_stop)
+                            right_segms = tf.matmul(right_segm_contribs, segms_stop)
                             left2_segms = tf.matmul(left_segm_contribs, left_segms)
                             right2_segms = tf.matmul(right_segm_contribs, right_segms)
                             frame_ctrl = tf.layers.dense(
                                 tf.concat([left_segms, left2_segms, right_segms, right2_segms], 2),
-                                segms.get_shape()[-1].value, tf.nn.relu, kernel_initializer=tf.zeros_initializer())
-                            ctrl = tf.concat([segms, frame_ctrl, frame], 2)
+                                repr_dim, tf.nn.relu)
+                            ctrl = tf.concat([segms_stop, frame_ctrl, frame], 2)
 
                             memory, assoc_probs, address_logits = softmax_assoc_memory_encoder(
-                                length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs, segms,
-                                ctrl, tensors.is_eval)
+                                length, repr_dim, shared_resources.config['num_slots'], frame_probs, segm_probs_stop,
+                                segms_stop, ctrl, tensors.is_eval)
                             # [B, L, N], [B, L, N * S] -> [B, L, S]
                             slots = tf.split(memory, shared_resources.config['num_slots'], 2)
 
                             tf.identity(tf.nn.softmax(address_logits), 'assoc_probs')
                             if regularize:
-                                losses = []
                                 weights = tf.sequence_mask(length, dtype=tf.float32)
                                 memory_reshaped = tf.reshape(
                                     memory, [-1, tf.shape(memory)[1], shared_resources.config['num_slots'], repr_dim])
-                                selected_slot = tf.squeeze(tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped),
-                                                           2)
+                                selected_slot = tf.squeeze(
+                                    tf.matmul(tf.expand_dims(assoc_probs, 2), memory_reshaped), 2)
                                 logits = tf.matmul(
                                     tf.layers.dense(tf.reshape(selected_slot, [-1, repr_dim]), repr_dim, tf.tanh),
                                     all_embeddings, transpose_b=True)
-                                losses.append(
+                                loss = \
                                     tf.losses.sparse_softmax_cross_entropy(
                                         tf.reshape(input_words, [-1]), logits, weights=tf.reshape(weights, [-1]),
-                                        loss_collection=None, reduction=tf.losses.Reduction.NONE))
-                                losses = tf.reshape(tf.add_n(losses), tf.shape(weights))
-                                tf.add_to_collection(tf.GraphKeys.LOSSES,
-                                                     0.03 * tf.reduce_mean(
-                                                         tf.reduce_sum(losses, 1) / tf.to_float(length)))
+                                        loss_collection=None)
+                                tf.add_to_collection(tf.GraphKeys.LOSSES, 0.03 * loss)
 
             return controller_out, segms, frame, slots, frame_probs, segm_probs
 
         s_ngram, s_segms, s_frames, s_slots, s_boundary_probs, s_segm_probs = encoding(
-            emb_support, tensors.support_length, tensors.support_words, regularize=True)
+            emb_support, tensors.support_length, tensors.support_words, regularize=False)
         q_ngram, q_segms, q_frames, q_slots, q_boundary_probs, q_segm_probs = encoding(
             emb_question, tensors.question_length, tensors.question_words, True)
 

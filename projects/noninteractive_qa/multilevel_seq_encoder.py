@@ -139,25 +139,20 @@ def weighted_bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
 
 
 def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
-    seq_as_start, seq_as_end, seq_transformed = tf.split(
-        tf.layers.dense(sequence, 3 * repr_dim), 3, 2)
-
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
         segm_contributions *= tf.transpose(mask, [0, 2, 1])
 
-    bow_sum = tf.matmul(segm_contributions, seq_transformed)
+    bow_sum = tf.matmul(segm_contributions, sequence)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
     bow_mean = bow_sum / (bow_num + 1e-6)
 
     segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
-    seq_as_start *= segm_starts
-    seq_as_end *= segm_ends
+    seq_as_start = tf.matmul(segm_contributions, sequence * segm_starts)
+    seq_as_end = tf.matmul(segm_contributions, sequence * segm_ends)
 
-    seq_as_start = tf.matmul(segm_contributions, seq_as_start)
-    seq_as_end = tf.matmul(segm_contributions, seq_as_end)
-
-    segment_reps = tf.nn.relu(bow_mean + seq_as_end + seq_as_start)
+    segment_reps, seq_as_end, seq_transformed = tf.layers.dense(
+        tf.concat([seq_as_start, seq_as_end, bow_mean], 2), repr_dim, tf.nn.relu)
 
     return segment_reps
 
