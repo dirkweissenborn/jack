@@ -153,7 +153,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 with tf.variable_scope("representations"):
                     with tf.variable_scope("phrase") as vs:
                         segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
-                        vs.reuse_vraiables()
+                        vs.reuse_variables()
                         segms_stop = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs_stop)
 
                     frame, slots = None, []
