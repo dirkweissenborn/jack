@@ -151,7 +151,8 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None)
     seq_as_start = tf.matmul(segm_contributions * segm_starts, sequence)
     seq_as_end = tf.matmul(segm_contributions * segm_ends, sequence)
 
-    segment_reps = tf.layers.dense(tf.concat([seq_as_start, seq_as_end, bow_mean], 2), repr_dim, tf.nn.relu)
+    segment_reps = tf.layers.dense(tf.concat([seq_as_start, seq_as_end, bow_mean], 2), repr_dim, tf.nn.relu,
+                                   name='bow_start_end_segm_dense')
 
     return segment_reps
 
