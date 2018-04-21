@@ -221,25 +221,41 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
         all_start_scores = []
         all_end_scores = []
+        q_reps = []
+        s_reps = []
+
         if 'word' in shared_resources.config['prediction_levels']:
             all_start_scores.append(score(emb_question, emb_support, 'start_word_score'))
             all_end_scores.append(score(emb_question, emb_support, 'end_word_score'))
+            q_reps.append(emb_question)
+            s_reps.append(emb_support)
         if 'ngram' in shared_resources.config['prediction_levels']:
             all_start_scores.append(score(q_ngram, s_ngram, 'start_ngram_score'))
             all_end_scores.append(score(q_ngram, s_ngram, 'end_ngram_score'))
+            q_reps.append(q_ngram)
+            s_reps.append(s_ngram)
         if 'segm' in shared_resources.config['prediction_levels']:
             all_start_scores.append(score(q_segms, s_segms, 'start_segm_score'))
             all_end_scores.append(score(q_segms, s_segms, 'end_segm_score'))
+            q_reps.append(q_segms)
+            s_reps.append(s_segms)
         if 'frame' in shared_resources.config['prediction_levels']:
             frames = score(q_frames, s_frames, 'frames_score')
             all_start_scores.append(frames)
             all_end_scores.append(frames)
+            q_reps.append(q_frames)
+            s_reps.append(s_frames)
 
         if 'assoc' in shared_resources.config['prediction_levels']:
             assoc_scores = tf.add_n(
                 [score(q, s, 'assoc_' + str(i)) for i, (q, s) in enumerate(zip(q_slots, s_slots))]) / len(q_slots)
             all_start_scores.append(assoc_scores)
             all_end_scores.append(assoc_scores)
+            q_reps.extend(tf.unstack(q_slots))
+            s_reps.extend(tf.unstack(s_slots))
+
+        tf.concat(q_reps, 2, name='question_representation')
+        tf.concat(s_reps, 2, name='support_representation')
 
         start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
             compute_spans(tf.add_n(all_start_scores) + support_mask, tf.add_n(all_end_scores) + support_mask,
