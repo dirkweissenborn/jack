@@ -8,14 +8,15 @@ from sklearn.metrics import classification_report
 from jack import readers
 from jack.core import QASetting
 
-
 PATH_TO_SENTEVAL = './SentEval'
 
 TRAIN = 'projects/noninteractive_qa/ner/data/eng.train'
 DEV = 'projects/noninteractive_qa/ner/data/eng.testa'
 TEST = 'projects/noninteractive_qa/ner/data/eng.testb'
 
-BATCH_SIZE = 32
+classifier_params = {'nhid': 0, 'optim': 'adam', 'batch_size': 64,
+                     'tenacity': 5, 'epoch_size': 1}
+
 
 def load_ner(file, labels=None):
     docs = list()
@@ -61,7 +62,7 @@ if __name__ == '__main__':
     import sys
 
     sys.path.insert(0, PATH_TO_SENTEVAL)
-    from senteval.tools.classifier import PyTorchClassifier
+    from senteval.tools.classifier import MLP
 
     reader_dir = sys.argv[1]
 
@@ -94,8 +95,8 @@ if __name__ == '__main__':
     clfs = []
     seed = 123
     for reg in regs:
-        clf = PyTorchClassifier(X["train"].shape[1], len(labels), batch_size=64, seed=seed,
-                                cudaEfficient=True)
+        clf = MLP(classifier_params, X["train"].shape[1], len(labels), batch_size=classifier_params["batch_size"],
+                  seed=seed, cudaEfficient=True)
         clf.fit(X['train'], y['train'], (X['valid'], y['valid']))
         scores.append(round(100 * clf.score(X['valid'], y['valid']), 2))
         clfs.append(clf)
