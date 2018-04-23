@@ -125,9 +125,12 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                 emb_support = tf.layers.dense(emb_support, repr_dim, tf.tanh, name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
-                all_words = tf.reshape(tf.concat([tensors.question_words, tensors.support_words], 1), [-1])
+                all_words = tf.reshape(
+                    tf.concat([tf.gather(tensors.question_words, tensors.support2question),
+                               tensors.support_words], 1), [-1])
                 all_embeddings = tf.unsorted_segment_max(
-                    tf.reshape(tf.concat([emb_question, emb_support], 1), [-1, repr_dim]), all_words,
+                    tf.reshape(tf.concat([tf.gather(emb_question, tensors.support2question), emb_support], 1),
+                               [-1, repr_dim]), all_words,
                     tf.reduce_max(all_words) + 1)
 
                 mask = tf.nn.dropout(tf.ones([1, 1, repr_dim]), keep_prob=1.0 - dropout)
