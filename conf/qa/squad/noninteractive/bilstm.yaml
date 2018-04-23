@@ -3,6 +3,7 @@ seed: 1337
 
 repr_dim: 256
 dropout: 0.2
+with_wiq: False
 
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_bilstm'
