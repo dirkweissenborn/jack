@@ -109,7 +109,6 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
 
 
 def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize=False, transform=True):
-
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
         segm_contributions *= tf.transpose(mask, [0, 2, 1])
@@ -146,7 +145,7 @@ def bow_start_end_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None)
 
     bow_sum = tf.matmul(segm_contributions, sequence)
     bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
-    bow_mean = bow_sum / bow_num
+    bow_mean = bow_sum / (bow_num + 1e-6)
 
     segm_starts = tf.concat([tf.ones([tf.shape(segm_ends)[0], 1, 1]), segm_ends[:, :-1]], 1)
     seq_as_start = tf.matmul(segm_contributions, sequence * segm_starts)

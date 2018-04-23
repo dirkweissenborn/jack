@@ -144,7 +144,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
                 segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval)
-                segm_probs_stop = tf.stop_gradient(segm_probs)
+                segm_probs_stop = segm_probs  # tf.stop_gradient(segm_probs)
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 frame_probs, frame_logits = edge_detection_encoder(
                     controller_out, repr_dim, tensors.is_eval, mask=segm_probs)
@@ -154,7 +154,7 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                     with tf.variable_scope("phrase") as vs:
                         segms = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs)
                         vs.reuse_variables()
-                        segms_stop = bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs_stop)
+                        segms_stop = segms  # bow_start_end_segm_encoder(inputs, length, repr_dim, segm_probs_stop)
 
                     frame, slots = None, []
 
