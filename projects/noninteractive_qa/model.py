@@ -60,8 +60,8 @@ class NonInteractiveModularQAModule(AbstractXQAModelModule):
 
         if shared_resources.config.get('with_wiq', False):
             batch_size, q_len, _ = tf.unstack(tf.shape(emb_question))
-            emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 1])], 2)
-            emb_support = tf.concat([emb_support, tensors.word_in_question], 2)
+            emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 2])], 2)
+            emb_support = tf.concat([emb_support, tf.stack([tensors.word_in_question, tensors.word_in_question], 2)], 2)
 
         with tf.variable_scope("encoder") as vs:
             encoded_question = modular_encoder(
