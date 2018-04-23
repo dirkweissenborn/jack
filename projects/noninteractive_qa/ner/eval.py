@@ -100,6 +100,7 @@ if __name__ == '__main__':
                   seed=seed, cudaEfficient=True, l2reg=reg)
         clf.fit(X['train'], y['train'], (X['valid'], y['valid']))
         scores.append(round(100 * clf.score(X['valid'], y['valid']), 2))
+        logging.info('Validation : reg = {0} with score {1}'.format(reg, scores[-1]))
         clfs.append(clf)
 
     logging.info([('reg:' + str(regs[idx]), scores[idx])
