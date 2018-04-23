@@ -91,8 +91,7 @@ if __name__ == '__main__':
     print('train:', X['train'].shape[0], 'valid:', X['valid'].shape[0], 'test:', X['test'].shape[0])
 
     logging.info('Training')
-    regs = [2 ** t for t in range(-2, 4, 1)]
-    regs = [1.0]
+    regs = [10 ** t for t in range(-5, -1)]
     scores = []
     clfs = []
     seed = 123
