@@ -97,7 +97,7 @@ if __name__ == '__main__':
     seed = 123
     for reg in regs:
         clf = MLP(classifier_params, X["train"].shape[1], len(labels), batch_size=classifier_params["batch_size"],
-                  seed=seed, cudaEfficient=True)
+                  seed=seed, cudaEfficient=True, l2reg=reg)
         clf.fit(X['train'], y['train'], (X['valid'], y['valid']))
         scores.append(round(100 * clf.score(X['valid'], y['valid']), 2))
         clfs.append(clf)
