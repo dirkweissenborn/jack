@@ -69,6 +69,8 @@ class NonInteractiveModularQAModule(AbstractXQAModelModule):
                 {'text': emb_support}, {'text': tensors.support_length}, {},
                 repr_dim, dropout, tensors.is_eval)[0]['text']
 
+        tf.identity(encoded_question, name='question_representation')
+
         start_scores, end_scores, span = _simple_answer_layer(
             encoded_question, encoded_support, repr_dim, shared_resources, tensors)
 

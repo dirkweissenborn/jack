@@ -1,19 +1,17 @@
+import logging
 import math
 
-from sklearn.linear_model import LogisticRegression
+import numpy as np
+import tensorflow as tf
 from sklearn.metrics import classification_report
 
 from jack import readers
 from jack.core import QASetting
-import tensorflow as tf
-import numpy as np
-import logging
 
 
 PATH_TO_SENTEVAL = './SentEval'
 
-
-TRAIN = 'projects/noninteractive_qa/ner/data/eng.testb'
+TRAIN = 'projects/noninteractive_qa/ner/data/eng.train'
 DEV = 'projects/noninteractive_qa/ner/data/eng.testa'
 TEST = 'projects/noninteractive_qa/ner/data/eng.testb'
 
@@ -63,7 +61,7 @@ if __name__ == '__main__':
     import sys
 
     sys.path.insert(0, PATH_TO_SENTEVAL)
-    from senteval.tools.validation import SplitClassifier
+    from senteval.tools.classifier import PyTorchClassifier
 
     reader_dir = sys.argv[1]
 
@@ -96,8 +94,9 @@ if __name__ == '__main__':
     clfs = []
     seed = 123
     for reg in regs:
-        clf = LogisticRegression(C=reg, random_state=seed)
-        clf.fit(X['train'], y['train'])
+        clf = PyTorchClassifier(X["train"].shape[1], len(labels), batch_size=64, seed=seed,
+                                cudaEfficient=True)
+        clf.fit(X['train'], y['train'], (X['valid'], y['valid']))
         scores.append(round(100 * clf.score(X['valid'], y['valid']), 2))
         clfs.append(clf)
 
