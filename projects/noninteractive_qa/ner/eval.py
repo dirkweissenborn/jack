@@ -14,7 +14,9 @@ TRAIN = 'projects/noninteractive_qa/ner/data/eng.train'
 DEV = 'projects/noninteractive_qa/ner/data/eng.testa'
 TEST = 'projects/noninteractive_qa/ner/data/eng.testb'
 
-classifier_params = {'nhid': 0, 'optim': 'adam', 'batch_size': 64,
+BATCH_SIZE = 64
+
+classifier_params = {'nhid': 0, 'optim': 'adam', 'batch_size': BATCH_SIZE,
                      'tenacity': 5, 'epoch_size': 1}
 
 
