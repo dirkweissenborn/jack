@@ -66,25 +66,3 @@ def load_snli(path, max_count=None):
     # We load to jtr dict and convert to qa settings for now
     jtr_data = convert_snli(path)
     return jack_to_qasetting(jtr_data, max_count)
-
-
-@_register('assertion')
-def load_assertions(path, max_count=None):
-    qa_settings = []
-    with open(path, 'r') as f:
-        for l in f:
-            if not l:
-                continue
-            l = l.strip()
-            assertion, subj_span, obj_span = l.split('\t')
-            subj_start, subj_end = subj_span.split(':')
-            obj_start, obj_end = obj_span.split(':')
-            subj = assertion[int(subj_start):int(subj_end)]
-            obj = assertion[int(obj_start):int(obj_end)]
-            if not subj or not obj:
-                continue
-            predicate = assertion[:int(subj_start)] + assertion[int(subj_end):int(obj_start)] + assertion[int(obj_end):]
-            qa_settings.append((QASetting(subj + '|' + obj), [Answer(predicate.strip())]))
-            if len(qa_settings) == max_count:
-                break
-    return qa_settings
