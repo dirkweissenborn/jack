@@ -18,6 +18,7 @@ tf.app.flags.DEFINE_integer('batch_size', 64, 'batch_size.')
 
 FLAGS = tf.app.flags.FLAGS
 dataset = loaders[FLAGS.loader](FLAGS.dataset)
+
 if FLAGS.assertion_store:
     reader = readers.reader_from_file(FLAGS.reader, assertion_dir=FLAGS.assertion_store)
 else:
@@ -33,7 +34,7 @@ bar = progressbar.ProgressBar(
     widgets=[' [', progressbar.Timer(), '] ', progressbar.Bar(), ' (', progressbar.ETA(), ') '])
 
 for idx in bar(range(0, len(dataset), FLAGS.batch_size)):
-    instances = dataset[idx:idx + FLAGS.batch_size]
+    instances = [q for q, _ in dataset[idx:idx + FLAGS.batch_size]]
     processed = input_module(instances)
     assertions = processed[AssertionMRPorts.assertions]
     assertion_lengths = processed[AssertionMRPorts.assertion_lengths]
@@ -48,7 +49,7 @@ for idx in bar(range(0, len(dataset), FLAGS.batch_size)):
         except Exception:
             pass
     for instance, a_s in zip(instances, a_strings):
-        id2sideinformation[instance[0].id] = {'conceptnet': a_s}
+        id2sideinformation[instance.id] = {'conceptnet': a_s}
     if DefinitionPorts.definitions in processed:
         definitions = processed[DefinitionPorts.definitions]
         definition_lengths = processed[DefinitionPorts.definition_lengths]
@@ -58,7 +59,7 @@ for idx in bar(range(0, len(dataset), FLAGS.batch_size)):
             b_idx = definition2question[i]
             d_strings[b_idx].append(' '.join(rev_vocab[idx] for idx in definitions[i, :definition_lengths[i]]))
         for instance, d_s in zip(instances, d_strings):
-            id2sideinformation[instance[0].id]['wikipedia'] = d_s
+            id2sideinformation[instance.id]['wikipedia'] = d_s
 
 with open(FLAGS.output, 'w') as f:
     json.dump(id2sideinformation, f, sort_keys=True, indent=2, separators=(',', ': '))
