@@ -11,7 +11,7 @@ from jack.core.shared_resources import SharedResources
 from jack.core.tensorflow import TFModelModule
 from jack.core.tensorport import Ports, TensorPort, TensorPortTensors
 from jack.core.torch import PyTorchModelModule
-from jack.readers.multiple_choice import util
+from jack.readers.classification.util import create_answer_vocab
 from jack.tfutil import misc
 from jack.tfutil.rnn import fused_birnn
 from jack.util import preprocessing
@@ -118,7 +118,8 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
                 word2lemma[support[i][k]] = lemma2idx[l]
 
             assertions, assertion_args = self._assertion_store.get_connecting_assertion_keys(
-                annot['question_lemmas'], annot['support_lemmas'])
+                annot['question_lemmas'], annot['support_lemmas'], self._sources)
+
             sorted_assertionss = sorted(assertions.items(), key=lambda x: -x[1])
             added_assertionss = set()
             for key, _ in sorted_assertionss:
@@ -206,15 +207,15 @@ class MultipleChoiceAssertionInputModule(OnlineInputModule[Mapping[str, any]]):
                 (q for q, _ in data), self.shared_resources.vocab, lowercase=True)
             self.shared_resources.vocab.freeze()
         if not hasattr(self.shared_resources, 'answer_vocab') or not self.shared_resources.answer_vocab.frozen:
-            self.shared_resources.answer_vocab = util.create_answer_vocab(answers=(a for _, ass in data for a in ass))
+            self.shared_resources.answer_vocab = create_answer_vocab(answers=(a for _, ass in data for a in ass))
             self.shared_resources.answer_vocab.freeze()
         self.shared_resources.config['answer_size'] = self.shared_resources.config.get(
             'answer_size', len(self.shared_resources.answer_vocab))
         self.shared_resources.char_vocab = {chr(i): i for i in range(256)}
 
     def setup(self):
-        self._assertion_store = AssertionStore(self.shared_resources.config["assertion_dir"],
-                                               self.shared_resources.config["assertion_sources"])
+        self._assertion_store = AssertionStore(self.shared_resources.config["assertion_dir"])
+        self._sources = self.shared_resources.config["assertion_sources"]
         self._limit = self.shared_resources.config.get("assertion_limit", 10)
         self.vocab = self.shared_resources.vocab
         self.config = self.shared_resources.config
@@ -302,11 +303,14 @@ class SimpleNLIModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
         logits = nli_model(size, num_classes, emb_question, tensors.question_length, emb_support,
                            tensors.support_length)
 
-        return logits, tf.argmax(logits, 1)
+        return {
+            Ports.Prediction.logits: logits,
+            Ports.Prediction.candidate_index: tf.argmax(logits, 1)
+        }
 
     def create_training_output(self, shared_resources: SharedResources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
-        return tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.labels),
+        return {Ports.loss: tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.target_index)}
 
 
 class NLIAssertionModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
@@ -321,7 +325,7 @@ class NLIAssertionModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
         support = tensors.support
         is_eval = tensors.is_eval
         word_embeddings = tensors.word_embeddings
-        assertion_length = tensors.assertion_length
+        assertion_length = tensors.assertion_lengths
         assertion2question = tensors.assertion2question
         assertions = tensors.assertions
         word2lemma = tensors.word2lemma
@@ -356,13 +360,13 @@ class NLIAssertionModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
             tf.get_variable_scope().reuse_variables()
 
             new_word_embeddings, _, _ = embedding_refinement(
-                size, new_word_embeddings,
+                size, new_word_embeddings, reading_encoder_config,
                 [assertions], [assertion2question], [assertion_length],
                 word2lemma, word_chars, word_char_length, is_eval, only_refine=True,
                 batch_size=tf.shape(question_length)[0], sequence_indices=[2])
         else:
             new_word_embeddings, reading_sequence_offset, _ = embedding_refinement(
-                size, word_embeddings,
+                size, word_embeddings, reading_encoder_config,
                 reading_sequence, reading_sequence_2_batch, reading_sequence_lengths,
                 word2lemma, word_chars, word_char_length, is_eval,
                 keep_prob=1.0 - shared_resources.config.get('dropout', 0.0),
@@ -376,22 +380,31 @@ class NLIAssertionModel(SingleSupportFixedClassAssertionMixin, TFModelModule):
         logits = nli_model(size, num_classes, emb_question, question_length, emb_support, support_length)
 
         if shared_resources.config.get("train_residual", False):
-            return tf.concat([logits, logits_1], 0), tf.argmax(logits, 1)
+            return {
+                Ports.Prediction.logits: tf.concat([logits, logits_1], 0),
+                Ports.Prediction.candidate_index: tf.argmax(logits, 1)
+            }
         else:
-            return logits, tf.argmax(logits, 1)
+            return {
+                Ports.Prediction.logits: logits,
+                Ports.Prediction.candidate_index: tf.argmax(logits, 1)
+            }
 
     def create_training_output(self, shared_resources: SharedResources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
         if shared_resources.config.get("train_residual", False):
-            losses = tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tf.tile(tensors.labels, [2]),
+            losses = tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits,
+                                                            labels=tf.tile(tensors.target_index, [2]),
                                                             reduction=tf.losses.Reduction.NONE)
             losses_with_assertions, losses = tf.split(losses, 2)
             loss_diff = tf.maximum(losses_with_assertions - losses + 0.1, 0.0)
             tf.summary.scalar('gain', tf.reduce_mean(losses - losses_with_assertions))
             tf.summary.scalar('loss', tf.reduce_mean(losses_with_assertions))
-            return tf.reduce_mean(losses_with_assertions + loss_diff),
+            return {Ports.loss: tf.reduce_mean(losses_with_assertions + loss_diff)}
         else:
-            return tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.labels),
+            return {
+                Ports.loss: tf.losses.sparse_softmax_cross_entropy(logits=tensors.logits, labels=tensors.target_index),
+            }
 
 
 def nli_model(size, num_classes, emb_question, question_length, emb_support, support_length):

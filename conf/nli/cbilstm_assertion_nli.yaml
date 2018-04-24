@@ -4,7 +4,7 @@ description: >
 parent_config: './conf/jack.yaml'
 
 
-assertion_dir: '/data/assertion_shelve'
+assertion_dir: '/data/assertion_store'
 assertion_limit: 20
 assertion_sources: ['conceptnet']
 

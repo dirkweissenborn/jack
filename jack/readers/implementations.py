@@ -254,47 +254,34 @@ def predicate_generator_fixed(resources_or_conf: Union[dict, SharedResources] = 
     return TFReader(shared_resources, input_module, model_module, output_module)
 
 
-@nli_reader
-def cbilstm_simple_nli_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule, SimpleNLIModel
-    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
+def _tf_assertion_nli_reader(model_module_constructor, resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule
+    from jack.readers.classification.shared import SimpleClassificationOutputModule
     shared_resources = create_shared_resources(resources_or_conf)
     input_module = MultipleChoiceAssertionInputModule(shared_resources)
-    model_module = SimpleNLIModel(shared_resources)
-    output_module = SimpleMCOutputModule(shared_resources)
+    model_module = model_module_constructor(shared_resources)
+    output_module = SimpleClassificationOutputModule(shared_resources)
     return TFReader(shared_resources, input_module, model_module, output_module)
+
+
+@nli_reader
+def cbilstm_simple_nli_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.assertion_mr.nli.shared import SimpleNLIModel
+    return _tf_nli_reader(SimpleNLIModel, resources_or_conf)
 
 
 @nli_reader
 def cbilstm_nli_assertion_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule, NLIAssertionModel
-    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
-    shared_resources = create_shared_resources(resources_or_conf)
-    input_module = MultipleChoiceAssertionInputModule(shared_resources)
-    model_module = NLIAssertionModel(shared_resources)
-    output_module = SimpleMCOutputModule(shared_resources)
-    return TFReader(shared_resources, input_module, model_module, output_module)
+    from projects.assertion_mr.nli.shared import NLIAssertionModel
+    return _tf_assertion_nli_reader(NLIAssertionModel, resources_or_conf)
 
 
 @nli_reader
 def cbilstm_nli_assertion_seeking_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    from projects.assertion_mr.nli.shared import MultipleChoiceAssertionInputModule
     from projects.assertion_mr.nli.assertion_seeking import NLIAssertionSeekingModel
-    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
-    shared_resources = create_shared_resources(resources_or_conf)
-    input_module = MultipleChoiceAssertionInputModule(shared_resources)
-    model_module = NLIAssertionSeekingModel(shared_resources)
-    output_module = SimpleMCOutputModule(shared_resources)
-    return TFReader(shared_resources, input_module, model_module, output_module)
-
+    return _tf_assertion_nli_reader(NLIAssertionSeekingModel, resources_or_conf)
 
 @nli_reader
 def cbilstm_nli_assertion_seeking_generating_reader(resources_or_conf: Union[dict, SharedResources] = None):
-    from projects.assertion_mr.nli.assertion_seek_and_generate import MultipleChoiceAssertionInputModuleWithPredicates
     from projects.assertion_mr.nli.assertion_seek_and_generate import NLIAssertionSeekingAndGeneratingModel
-    from jack.readers.multiple_choice.shared import SimpleMCOutputModule
-    shared_resources = create_shared_resources(resources_or_conf)
-    input_module = MultipleChoiceAssertionInputModuleWithPredicates(shared_resources)
-    model_module = NLIAssertionSeekingAndGeneratingModel(shared_resources)
-    output_module = SimpleMCOutputModule(shared_resources)
-    return TFReader(shared_resources, input_module, model_module, output_module)
+    return _tf_assertion_nli_reader(NLIAssertionSeekingAndGeneratingModel, resources_or_conf)
