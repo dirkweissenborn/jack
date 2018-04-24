@@ -3,8 +3,9 @@ from __future__ import print_function
 
 import argparse
 import json
+import sys
 
-from jack.eval.extractive_qa_eval import *
+from jack.eval.extractive_qa import *
 
 
 def evaluate(dataset, predictions):
