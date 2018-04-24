@@ -38,7 +38,7 @@ $ python3 projects/knowledge_integration/scripts/extract_wikipedia_short_abstrac
 
 ### Pre-trained Word Embeddings
 
-Download pre-trained word embeddings and training data (see `data/`) if not already done:
+Download pre-trained word embeddings and training data (see [data/](/data/)) if not already done:
 
 ```
 $ ./data/GloVe/download.sh
