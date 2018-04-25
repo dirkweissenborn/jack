@@ -1,3 +1,6 @@
 [submodule "SentEval"]
 	path = SentEval
 	url = https://github.com/facebookresearch/SentEval
+[submodule "allennlp"]
+	path = allennlp
+	url = https://github.com/allenai/allennlp.git
