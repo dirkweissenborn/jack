@@ -6,6 +6,7 @@ from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules.token_embedders.token_embedder import TokenEmbedder
 from jack.core import QASetting
 from jack.readers import *
+from jack.readers.extractive_qa.shared import XQAAnnotation
 
 
 @TokenEmbedder.register("jack_embedder")
@@ -36,17 +37,26 @@ class JackEmbedder(TokenEmbedder):
         return cls(reader_path, vocab)
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:  # pylint: disable=arguments-differ
-        texts = []
-        for i in range(tokens.shape[0]):
-            texts.append([])
-            for j in range(tokens.shape[1]):
-                if tokens.data[i, j] == 0:
-                    break
-                texts[-1].append(self.vocab.get_index_to_token_vocabulary("tokens").get(tokens[i, j], 'UNK'))
-            texts[-1] = QASetting(' '.join(texts[-1]), [''])
+        question_tokens = [
+            [self.vocab.get_index_to_token_vocabulary("tokens").get(int(tokens[i, j]),
+                                                                    self.jack_reader.shared_resources.vocab.unk)
+             for j in range(tokens.shape[1]) if tokens.data[i, j] != 0] for i in range(tokens.shape[0])]
 
-        tensors = self.jack_reader.input_module(texts)
+        annot = [
+            XQAAnnotation(
+                question_tokens=q,
+                question_ids=[self.jack_reader.shared_resources.vocab.get_id(w) for w in q],
+                question_length=len(q),
+                support_tokens=[[]],
+                support_ids=[[]],
+                support_length=[0],
+                word_in_question=[[]],
+                token_offsets=[[]],
+                answer_spans=None,
+                selected_supports=[[]]
+            ) for q in question_tokens]
+        tensors = self.jack_reader.input_module.create_batch(annot, True, False)
         encoded = self.jack_reader.session.run(self.question_op,
                                                feed_dict=self.jack_reader.model_module.convert_to_feed_dict(tensors))
 
-        return torch.autograd.Variable(torch.Tensor(encoded))
+        return torch.autograd.Variable(torch.Tensor(encoded)).cuda(tokens.get_device())
