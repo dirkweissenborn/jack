@@ -54,7 +54,10 @@ def load(dataset_path, sentences_path):
                     },
                     'answers': [{"span": span, "text": sentence[span[0]:span[1]]} for span in spans]
                 })
-    return qas
+    return {
+        'meta': dataset_path.split('/')[-1],
+        'instances': qas
+    }
 
 
 def main():
