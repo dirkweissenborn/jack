@@ -17,10 +17,10 @@ encoder:
     layer_norm: True
 
   - input: 'text'
+    output: 'text_self'
     module: 'positional_encoding'
 
-  - input: 'text'
-    output: 'text_self'
+  - input: 'text_self'
     module: 'dense'
     repr_dim: 32
     activation: 'tanh'
