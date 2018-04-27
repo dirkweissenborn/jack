@@ -141,7 +141,7 @@ class XQAInputModule(OnlineInputModule[XQAAnnotation]):
         word_in_question, token_offsets, answer_spans = prepare_data(
             question, answers, self.vocab, self.config.get("lowercase", False),
             with_answers=has_answers, max_support_length=self.config.get("max_support_length", None),
-            spacy_nlp=True)
+            spacy_nlp=False)
 
         max_num_support = self.config.get("max_num_support", len(question.support))  # take all per default
 

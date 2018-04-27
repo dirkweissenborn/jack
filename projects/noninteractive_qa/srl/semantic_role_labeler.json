@@ -12,8 +12,8 @@
       }
     }
   },
-  "train_data_path": "/run/media/diwe01/Data3/ontonotes-release-5.0/conll-formatted-ontonotes-5.0-12/conll-formatted-ontonotes-5.0/data/development",
-  "validation_data_path": "/run/media/diwe01/Data3/ontonotes-release-5.0/conll-formatted-ontonotes-5.0-12/conll-formatted-ontonotes-5.0/data/development",
+  "train_data_path": "TODO",
+  "validation_data_path": "TODO",
   "model": {
     "type": "srl",
     "text_field_embedder": {
@@ -61,7 +61,7 @@
     "grad_clipping": 1.0,
     "patience": 20,
     "validation_metric": "+f1-measure-overall",
-    "cuda_device": -1,
+    "cuda_device": 0,
     "optimizer": {
       "type": "adadelta",
       "rho": 0.95

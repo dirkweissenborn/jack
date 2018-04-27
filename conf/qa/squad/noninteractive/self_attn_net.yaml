@@ -1,0 +1,47 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 256
+dropout: 0.2
+with_wiq: False
+
+reader: 'non_interactive_qa_reader'
+name: 'noninteractive_bilstm'
+
+encoder:
+  - input: 'text'
+    module: 'conv_glu'
+    conv_width: 7
+    num_layers: 4
+    residual: True
+    layer_norm: True
+
+  - input: 'text'
+    module: 'positional_encoding'
+
+  - input: 'text'
+    output: 'text_self'
+    module: 'dense'
+    repr_dim: 32
+    activation: 'tanh'
+
+  - input: 'text_self'
+    module: 'self_attn'
+    attn_type: 'dot'
+    scaled: True
+    with_sentinel: True
+    num_attn_heads: 8
+    key_value_attn: True
+
+  - input: 'text_self'
+    module: 'dense'
+    activation: 'tanh'
+
+  - input: ['text', 'text_self']
+    output: 'text'
+    module: 'add'
+    layer_norm: True
+
+  - input: 'text'
+    module: 'dense'
+    activation: 'tanh'

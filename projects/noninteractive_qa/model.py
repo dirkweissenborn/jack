@@ -153,11 +153,11 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
                         {'text': inputs}, {'text': length}, {},
                         repr_dim, dropout, is_eval=tensors.is_eval)[0]['text']
 
-                segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval)
+                segm_probs, segm_logits = edge_detection_encoder(controller_out, repr_dim, tensors.is_eval, bias=-1)
                 segm_probs_stop = segm_probs  # tf.stop_gradient(segm_probs)
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 frame_probs, frame_logits = edge_detection_encoder(
-                    controller_out, repr_dim, tensors.is_eval, mask=segm_probs)
+                    controller_out, repr_dim, tensors.is_eval, mask=segm_probs, bias=-1)
                 tf.identity(tf.sigmoid(frame_logits), name='frame_probs')
 
                 with tf.variable_scope("representations"):
@@ -222,9 +222,9 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
             with tf.variable_scope(name) as vs:
                 q = tf.reduce_sum(question_attention_weights * q, 1)
                 q = tf.gather(q, tensors.support2question)
-                question_hidden = tf.layers.dense(q, repr_dim, tf.nn.relu, name="hidden")
+                question_hidden = tf.layers.dense(q, repr_dim, tf.nn.tanh, name="hidden")
                 vs.reuse_variables()
-                hidden = tf.layers.dense(s, repr_dim, tf.nn.relu, name="hidden")
+                hidden = tf.layers.dense(s, repr_dim, tf.nn.tanh, name="hidden")
                 scores = tf.einsum('ik,ijk->ij', question_hidden, hidden)
                 tf.identity(scores, name=name)
                 return scores
@@ -439,10 +439,10 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         question_state = tf.split(question_state, len(encoded_support), 1)
         for i, (q, s) in enumerate(zip(question_state, encoded_support)):
             with tf.variable_scope('prediction' + str(i)) as vs:
-                question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.relu, name="hidden")
+                question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.tanh, name="hidden")
                 question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
                 vs.reuse_variables()
-                hidden = tf.layers.dense(s, 2 * repr_dim, tf.nn.relu, name="hidden")
+                hidden = tf.layers.dense(s, 2 * repr_dim, tf.nn.tanh, name="hidden")
                 hidden_start, hidden_end = tf.split(hidden, 2, 2)
                 support_mask = misc.mask_for_lengths(tensors.support_length)
                 start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
@@ -604,10 +604,10 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
     # computing single time attention over question
     question_state = compute_question_state(encoded_question, tensors.question_length)
     question_state = tf.gather(question_state, tensors.support2question)
-    question_state = tf.layers.dense(question_state, 2 * repr_dim, tf.nn.relu, name="hidden")
+    question_state = tf.layers.dense(question_state, 2 * repr_dim, tf.nn.tanh, name="hidden")
     question_state_start, question_state_end = tf.split(question_state, 2, 1)
     tf.get_variable_scope().reuse_variables()
-    hidden = tf.layers.dense(encoded_support, 2 * repr_dim, tf.nn.relu, name="hidden")
+    hidden = tf.layers.dense(encoded_support, 2 * repr_dim, tf.nn.tanh, name="hidden")
     hidden_start, hidden_end = tf.split(hidden, 2, 2)
     support_mask = misc.mask_for_lengths(tensors.support_length)
     start_scores = tf.einsum('ik,ijk->ij', question_state_start, hidden_start)
@@ -619,3 +619,34 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
                       max_span_size=shared_resources.config.get('max_span_size', 16))
     span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
     return start_scores, end_scores, span
+
+
+def _labeling_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
+    # computing single time attention over question
+    question_state = compute_question_state(encoded_question, tensors.question_length)
+    question_state = tf.gather(question_state, tensors.support2question)
+    question_state = tf.layers.dense(question_state, 4 * repr_dim, tf.nn.tanh, name="hidden")
+    question_state = tf.reshape(question_state, [-1, repr_dim, 4])
+    tf.get_variable_scope().reuse_variables()
+    hidden = tf.layers.dense(encoded_support, repr_dim, tf.nn.tanh, name="hidden")
+    scores = tf.einsum('ijk,ikl->ijl', hidden, question_state)
+
+    logprobs = tf.nn.log_softmax(scores)
+
+    b_logprobs, l_logprobs, i_logprobs, o_logprobs = tf.split(logprobs, 4, 3)
+    o_logprobs *= tf.sequence_mask(tensors.support_length, dtype=tf.float32)
+
+    # [B, L, L]
+    span_logprobs = (b_logprobs + tf.transpose(l_logprobs, [0, 2, 1]) +
+                     tf.cumsum(o_logprobs, axis=1, exclusive=True) +
+                     tf.cumsum(tf.transpose(o_logprobs, [0, 2, 1]), axis=2, exclusive=True, reverse=True) +
+                     tf.cumsum(tf.transpose(i_logprobs, [0, 2, 1]), exclusive=True) -
+                     tf.cumsum(i_logprobs))
+
+    length = tf.shape(span_logprobs)[1]
+    best_span = tf.argmax(tf.reshape(span_logprobs, [tf.shape(span_logprobs)[0], -1]), output_type=tf.int32)
+
+    best_start = best_span / length
+    best_end = best_span % length
+
+    return scores, tf.stack([tf.range(0, tf.shape(span_logprobs)[0], dtype=tf.int32), best_start, best_end], 1)
