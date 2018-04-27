@@ -6,7 +6,7 @@ dropout: 0.2
 with_wiq: False
 
 reader: 'non_interactive_qa_reader'
-name: 'noninteractive_bilstm'
+name: 'noninteractive_self_attn'
 
 encoder:
   - input: 'text'
@@ -28,6 +28,7 @@ encoder:
   - input: 'text_self'
     module: 'self_attn'
     attn_type: 'dot'
+    repr_dim: 32
     scaled: True
     with_sentinel: True
     num_attn_heads: 8
