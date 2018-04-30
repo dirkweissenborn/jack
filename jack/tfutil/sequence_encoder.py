@@ -77,7 +77,6 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
                 out += sequence
 
             if dropout is not None:
-                print('DING')
                 out = tf.cond(
                     tf.greater(dropout, 0.0),
                     lambda: tf.nn.dropout(out, 1.0 - dropout, noise_shape=[tf.shape(out)[0], 1, tf.shape(out)[-1]]),
