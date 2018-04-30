@@ -12,4 +12,4 @@ num_slots: 1
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
 
-depth: 2
+num_layers: 2

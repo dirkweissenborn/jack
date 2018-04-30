@@ -8,19 +8,21 @@ with_wiq: False
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_self_attn'
 
-encoder:
+encoder_block: &encoder_block
   - input: 'text'
-    module: 'conv_glu'
+    module: 'positional_encoding'
+    layer_norm: True
+
+  - input: 'text'
+    module: 'conv_separable'
     conv_width: 7
     num_layers: 4
     residual: True
     layer_norm: True
+    dropout: True
 
   - input: 'text'
     output: 'text_self'
-    module: 'positional_encoding'
-
-  - input: 'text_self'
     module: 'dense'
     repr_dim: 32
     activation: 'tanh'
@@ -30,13 +32,12 @@ encoder:
     attn_type: 'dot'
     repr_dim: 32
     scaled: True
-    with_sentinel: True
     num_attn_heads: 8
     key_value_attn: True
 
   - input: 'text_self'
     module: 'dense'
-    activation: 'tanh'
+    activation: 'relu'
 
   - input: ['text', 'text_self']
     output: 'text'
@@ -46,3 +47,11 @@ encoder:
   - input: 'text'
     module: 'dense'
     activation: 'tanh'
+
+
+encoder:
+  - module: 'repeat'
+    num: 1
+    reuse: False
+    encoder: *encoder_block
+

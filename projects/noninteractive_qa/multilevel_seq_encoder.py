@@ -181,7 +181,7 @@ def segmentation_encoder(sequence, length, repr_dim, segm_ends):
 
 
 def edge_detection_encoder(inputs, repr_dim, is_eval, mask=None, bias=0.0):
-    edge_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu), 1,
+    edge_logits = tf.layers.dense(tf.layers.dense(inputs, repr_dim, tf.nn.relu) if repr_dim > 0 else inputs, 1,
                                   bias_initializer=tf.constant_initializer(bias))
     edge_probs = tf.cond(is_eval,
                          lambda: tf.round(tf.sigmoid(edge_logits)),
