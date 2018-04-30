@@ -356,9 +356,10 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                 segm_probs = None
                 segms = inputs
                 # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
-                ctrl = gated_linear_convnet(repr_dim, inputs, 2, width=5)
+                ctrl = gated_linear_convnet(repr_dim, inputs, 1, conv_width=5)
                 representations.append(inputs)
                 representations.append(ctrl)
+
                 for i in range(shared_resources.config['num_layers']):
                     with tf.variable_scope("layer" + str(i)):
                         prev_segm_probs = segm_probs
@@ -368,8 +369,8 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
 
                         prev_segm_probs = prev_segm_probs if i > 0 else None
-                        segms = bow_segm_encoder(segms, length, repr_dim, segm_probs, mask=prev_segm_probs,
-                                                 normalize=True)
+                        segms = bow_segm_encoder(
+                            segms, length, repr_dim, segm_probs, mask=prev_segm_probs, normalize=True)
 
                         # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                         representations.append(segms)

@@ -47,7 +47,7 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
                 out = gated_linear_convnet(repr_dim, sequence, 1, **kwargs)
             elif module == 'conv_separable':
                 out = depthwise_separable_convolution(
-                    repr_dim, sequence, 1, activation=activation_from_string(activation), **kwargs)
+                    repr_dim, sequence, activation=activation_from_string(activation), **kwargs)
             elif module == 'dense':
                 out = tf.layers.dense(sequence, repr_dim)
                 if activation:
@@ -119,28 +119,28 @@ def bi_sru(size, sequence, seq_length, with_residual=True, name='bi_sru', reuse=
 # Convolution Encoders
 
 
-def convnet(repr_dim, inputs, num_layers, width=3, activation=tf.nn.relu, **kwargs):
+def convnet(repr_dim, inputs, num_layers, conv_width=3, activation=tf.nn.relu, **kwargs):
     # dim reduction
     output = inputs
     for i in range(num_layers):
-        output = _convolutional_block(output, repr_dim, width=width, name="conv_%d" % i)
+        output = _convolutional_block(output, repr_dim, conv_width=conv_width, name="conv_%d" % i)
     return output
 
 
-def _convolutional_block(inputs, out_channels, width=3, name='conv', activation=tf.nn.relu):
+def _convolutional_block(inputs, out_channels, conv_width=3, name='conv', activation=tf.nn.relu, **kwargs):
     channels = inputs.get_shape()[2].value
-    # [filter_height, filter_width, in_channels, out_channels]
-    f = tf.get_variable(name + '_filter', [width, channels, out_channels])
+    # [filter_height, filter_conv_width, in_channels, out_channels]
+    f = tf.get_variable(name + '_filter', [conv_width, channels, out_channels])
     output = tf.nn.conv1d(inputs, f, 1, padding='SAME', name=name)
     return activation(output)
 
 
-def depthwise_separable_convolution(repr_dim, inputs, width, activation=tf.nn.relu, bias=True, **kwargs):
+def depthwise_separable_convolution(repr_dim, inputs, conv_width, activation=tf.nn.relu, bias=True, **kwargs):
     inputs = tf.expand_dims(inputs, 1)
     shapes = inputs.shape.as_list()
 
     depthwise_filter = tf.get_variable("depthwise_filter",
-                                       (1, width, shapes[-1], 1),
+                                       (1, conv_width, shapes[-1], 1),
                                        dtype=tf.float32)
     pointwise_filter = tf.get_variable("pointwise_filter", (1, 1, shapes[-1], repr_dim),
                                        dtype=tf.float32)
@@ -158,20 +158,20 @@ def depthwise_separable_convolution(repr_dim, inputs, width, activation=tf.nn.re
 
 
 # following implementation of fast encoding in https://openreview.net/pdf?id=HJRV1ZZAW
-def _residual_dilated_convolution_block(inputs, dilation=1, width=3, name="dilated_conv"):
-    # [filter_height, filter_width, in_channels, out_channels]
+def _residual_dilated_convolution_block(inputs, dilation=1, conv_width=3, name="dilated_conv"):
+    # [filter_height, filter_conv_width, in_channels, out_channels]
     output = inputs
     channels = inputs.get_shape()[2].value
     for i in range(2):
-        # [filter_height, filter_width, in_channels, out_channels]
-        output = _convolutional_glu_block(output, channels, dilation, width, name=name + '_' + str(i))
+        # [filter_height, filter_conv_width, in_channels, out_channels]
+        output = _convolutional_glu_block(output, channels, dilation, conv_width, name=name + '_' + str(i))
     return output + inputs
 
 
-def _convolutional_glu_block(inputs, out_channels, dilation=1, width=3, name='conv_glu'):
+def _convolutional_glu_block(inputs, out_channels, dilation=1, conv_width=3, name='conv_glu', **kwargs):
     channels = inputs.get_shape()[2].value
-    # [filter_height, filter_width, in_channels, out_channels]
-    f = tf.get_variable(name + '_filter', [1, width, channels, out_channels * 2])
+    # [filter_height, filter_conv_width, in_channels, out_channels]
+    f = tf.get_variable(name + '_filter', [1, conv_width, channels, out_channels * 2])
     output = tf.nn.atrous_conv2d(tf.expand_dims(inputs, 1), f, dilation, 'SAME', name=name)
     output = tf.squeeze(output, 1)
     output, gate = tf.split(output, 2, 2)
@@ -179,7 +179,7 @@ def _convolutional_glu_block(inputs, out_channels, dilation=1, width=3, name='co
     return output
 
 
-def gated_linear_dilated_residual_network(out_size, inputs, dilations, width=3, name='gldr_network', reuse=None,
+def gated_linear_dilated_residual_network(out_size, inputs, dilations, conv_width=3, name='gldr_network', reuse=None,
                                           **kwargs):
     """Follows https://openreview.net/pdf?id=HJRV1ZZAW.
 
@@ -194,17 +194,17 @@ def gated_linear_dilated_residual_network(out_size, inputs, dilations, width=3, 
     # dim reduction
     output = _convolutional_glu_block(inputs, out_size, name='conv_dim_reduction')
     for i, d in enumerate(dilations):
-        output = _residual_dilated_convolution_block(output, d, width, name='dilated_conv_%d' % i)
+        output = _residual_dilated_convolution_block(output, d, conv_width, name='dilated_conv_%d' % i)
     return output
 
 
-def gated_linear_convnet(out_size, inputs, num_layers, width=3, **kwargs):
+def gated_linear_convnet(out_size, inputs, num_layers, conv_width=3):
     """Follows https://openreview.net/pdf?id=HJRV1ZZAW.
 
     Args:
         out_size: size of output
         inputs: input sequence tensor [batch_size, length, size]
-        num_layers: number of conv layers with width
+        num_layers: number of conv layers with conv_width
 
     Returns:
         [batch_size, length, out_size] tensor
@@ -212,7 +212,7 @@ def gated_linear_convnet(out_size, inputs, num_layers, width=3, **kwargs):
     # dim reduction
     output = inputs
     for i in range(num_layers):
-        output = _convolutional_glu_block(output, out_size, width=width, name="conv_%d" % i)
+        output = _convolutional_glu_block(output, out_size, conv_width=conv_width, name="conv_%d" % i)
     return output
 
 
