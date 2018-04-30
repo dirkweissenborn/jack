@@ -59,11 +59,12 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                                name="embeddings_projection")
                 emb_question = highway_network(emb_question, 1)
                 vs.reuse_variables()
-                emb_support = tf.layers.dense(emb_support, repr_dim - 1  if with_wiq else repr_dim,
+                emb_support = tf.layers.dense(emb_support, repr_dim - 1 if with_wiq else repr_dim,
                                               name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
-        mask = tf.nn.dropout(tf.ones([tf.shape(emb_question)[0], 1, repr_dim]), keep_prob=1.0 - dropout)
+        mask = tf.nn.dropout(tf.ones([tf.shape(emb_question)[0], 1, repr_dim - 1 if with_wiq else repr_dim]),
+                             keep_prob=1.0 - dropout)
         emb_support, emb_question = tf.cond(tensors.is_eval,
                                             lambda: (emb_support, emb_question),
                                             lambda: (emb_support * tf.gather(mask, tensors.support2question),
