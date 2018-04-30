@@ -380,7 +380,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         # computing single time attention over question
         encoded_question = tf.concat(encoded_question, 2)
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
-        question_state = tf.einsum('ij,ijk->ik', question_attention_weights, encoded_question)
+        question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
         question_state = tf.split(question_state, len(encoded_support), 1)
         all_start_scores, all_end_scores = [], []
