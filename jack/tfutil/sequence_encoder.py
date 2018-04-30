@@ -74,7 +74,7 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
             with tf.variable_scope('layernorm', reuse=False) as vs:
                 vs._reuse = False  # HACK
                 num_layernorms = sum(1 for v in vs.global_variables() if 'layernorm' in v.name)
-                out = tf.contrib.layers.layer_norm(sequence, scope=str(num_layernorms))
+                out = tf.contrib.layers.layer_norm(out, scope=str(num_layernorms))
 
         if dropout is not None:
             out = tf.cond(
