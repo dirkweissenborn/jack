@@ -362,7 +362,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                     with tf.variable_scope("layer" + str(i)):
                         prev_segm_probs = segm_probs
                         segm_probs, segm_logits = edge_detection_encoder(
-                            ctrl, 0, tensors.is_eval, mask=segm_probs, bias=-1.0)
+                            ctrl, repr_dim, tensors.is_eval, mask=segm_probs, bias=-1.0)
 
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
 

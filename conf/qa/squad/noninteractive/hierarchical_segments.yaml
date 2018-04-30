@@ -3,6 +3,7 @@ seed: 1337
 
 repr_dim: 256
 dropout: 0.2
+learning_rate: 0.0005
 
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
