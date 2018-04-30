@@ -6,7 +6,7 @@ dropout: 0.2
 with_wiq: False
 
 reader: 'non_interactive_qa_reader'
-name: 'noninteractive_self_attn'
+name: 'noninteractive_qanet'
 
 encoder_block: &encoder_block
   - input: 'text'
