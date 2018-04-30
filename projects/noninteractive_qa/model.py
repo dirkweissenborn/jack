@@ -76,13 +76,13 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             emb_support = tf.concat([emb_support, tf.expand_dims(tensors.word_in_question, 2)], 2)
 
         with tf.variable_scope("encoder") as vs:
-            encoded_question = self.encoder(shared_resources, emb_question, tensors.question_length, tensors)
+            encoded_question_list = self.encoder(shared_resources, emb_question, tensors.question_length, tensors)
             vs.reuse_variables()
-            encoded_support = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
+            encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
         if shared_resources.config.get('is_interactive'):
-            encoded_question = tf.concat(encoded_question, 2)
-            encoded_support = tf.concat(encoded_support, 2)
+            encoded_question = tf.concat(encoded_question_list, 2)
+            encoded_support = tf.concat(encoded_support_list, 2)
 
             with tf.variable_scope('attention'):
                 diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
@@ -98,12 +98,12 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
             emb_support += question2support
             with tf.variable_scope("encoder", reuse=True):
-                encoded_support = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
+                encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
-        tf.identity(tf.concat(encoded_question, 2), name='question_representation')
+        tf.identity(tf.concat(encoded_question_list, 2), name='question_representation')
 
         start_scores, end_scores, span = _simple_answer_layer(
-            encoded_question, encoded_support, repr_dim, shared_resources, tensors)
+            encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
         return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
 
