@@ -1,13 +1,8 @@
 parent_config: './conf/qa/squad/abstract_squad.yaml'
 seed: 1337
 
-repr_dim: 128
+repr_dim: 256
 dropout: 0.2
-epochs: 15
-learning_rate: 0.0005
-
-assoc: True
-num_slots: 1
 
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
