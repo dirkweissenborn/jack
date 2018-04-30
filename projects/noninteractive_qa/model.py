@@ -9,7 +9,7 @@ from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
-from jack.tfutil.sequence_encoder import gated_linear_convnet, depthwise_separable_convolution
+from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
 
@@ -355,7 +355,8 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
             with tf.variable_scope("encoding", reuse=reuse):
                 segm_probs = None
                 segms = inputs
-                ctrl = depthwise_separable_convolution(repr_dim, inputs, 7)
+                # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
+                ctrl = gated_linear_convnet(repr_dim, inputs, 2, width=5)
                 representations.append(inputs)
                 representations.append(ctrl)
                 for i in range(shared_resources.config['num_layers']):

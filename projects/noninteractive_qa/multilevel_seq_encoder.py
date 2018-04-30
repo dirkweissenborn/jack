@@ -112,11 +112,11 @@ def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
         segm_contributions *= tf.transpose(mask, [0, 2, 1])
+
+    sequence = tf.matmul(segm_contributions, sequence)
     if normalize:
         bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
         sequence /= (bow_num + 1e-6)
-
-    sequence = tf.matmul(segm_contributions, sequence)
     seq_transformed = tf.layers.dense(sequence, repr_dim, tf.nn.relu,
                                       name='bow_segm_dense') if transform else sequence
 
