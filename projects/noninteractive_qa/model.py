@@ -32,6 +32,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
         repr_dim = shared_resources.config["repr_dim"]
         with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
         dropout = shared_resources.config.get("dropout", 0.0)
+        with_wiq = shared_resources.config.get('with_wiq', False)
 
         # set shapes for inputs
         tensors.emb_question.set_shape([None, None, input_size])
@@ -54,10 +55,12 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                 emb_question.set_shape([None, None, input_size])
                 emb_support.set_shape([None, None, input_size])
 
-                emb_question = tf.layers.dense(emb_question, repr_dim, name="embeddings_projection")
+                emb_question = tf.layers.dense(emb_question, repr_dim - 1 if with_wiq else repr_dim,
+                                               name="embeddings_projection")
                 emb_question = highway_network(emb_question, 1)
                 vs.reuse_variables()
-                emb_support = tf.layers.dense(emb_support, repr_dim, name="embeddings_projection")
+                emb_support = tf.layers.dense(emb_support, repr_dim - 1  if with_wiq else repr_dim,
+                                              name="embeddings_projection")
                 emb_support = highway_network(emb_support, 1)
 
         mask = tf.nn.dropout(tf.ones([tf.shape(emb_question)[0], 1, repr_dim]), keep_prob=1.0 - dropout)
@@ -68,8 +71,8 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         if shared_resources.config.get('with_wiq', False):
             batch_size, q_len, _ = tf.unstack(tf.shape(emb_question))
-            emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 2])], 2)
-            emb_support = tf.concat([emb_support, tf.stack([tensors.word_in_question, tensors.word_in_question], 2)], 2)
+            emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 1])], 2)
+            emb_support = tf.concat([emb_support, tf.expand_dims(tensors.word_in_question, 2)], 2)
 
         with tf.variable_scope("encoder") as vs:
             encoded_question = self.encoder(shared_resources, emb_question, tensors.question_length, tensors)
