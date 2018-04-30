@@ -198,7 +198,7 @@ def gated_linear_dilated_residual_network(out_size, inputs, dilations, conv_widt
     return output
 
 
-def gated_linear_convnet(out_size, inputs, num_layers, conv_width=3):
+def gated_linear_convnet(out_size, inputs, num_layers, conv_width=3, **kwargs):
     """Follows https://openreview.net/pdf?id=HJRV1ZZAW.
 
     Args:
