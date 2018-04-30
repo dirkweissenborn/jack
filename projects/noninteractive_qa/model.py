@@ -511,10 +511,14 @@ class HierarchicalSegmentInteractiveQAModule(AbstractXQAModelModule):
         encoded_support = tf.concat(encoded_support, 2)
 
         # [B, S, Q]
-        attn_scores = tf.einsum('abc,adc->abd', encoded_support, encoded_question)
-        attn_scores += tf.expand_dims(misc.mask_for_lengths(tensors.support_length), 2)
-
-        attn_prob = tf.nn.softmax(attn_scores, 1)
+        with tf.variable_scope('attention'):
+            diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
+                                   initializer=tf.ones_initializer())
+            diag = tf.nn.relu(diag)
+            attn_scores = tf.einsum('abc,adc->abd', encoded_support, encoded_question * diag)
+            attn_scores += tf.expand_dims(misc.mask_for_lengths(tensors.support_length), 2)
+            attn_scores /= math.sqrt(float(encoded_question.get_shape()[-1].value))
+            attn_prob = tf.nn.softmax(attn_scores, 1)
 
         question2support = tf.einsum('bsq,bqr->bsr', attn_prob, emb_question)
 
