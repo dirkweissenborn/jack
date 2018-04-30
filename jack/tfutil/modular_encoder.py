@@ -85,15 +85,12 @@ def modular_encoder(encoder_config, inputs, inputs_length, inputs_mapping, defau
                     outputs[dep_key], outputs_length[dep_key],
                     outputs_mapping.get(key), outputs_mapping.get(dep_key), reuse=reuse, **module)
             else:
+                if module.get('dropout') is True:
+                    # set dropout to default dropout
+                    module['dropout'] = dropout
                 outputs[out_key] = encoder(outputs[key], outputs_length[key], reuse=reuse, **module)
             outputs_length[out_key] = outputs_length[key]
             outputs_mapping[out_key] = outputs_mapping.get(key)
-            if module.get('dropout', False):
-                outputs[out_key] = tf.cond(
-                    is_eval,
-                    lambda: outputs[out_key],
-                    lambda: tf.nn.dropout(
-                        outputs[out_key], 1.0 - dropout, noise_shape=[1, 1, outputs[out_key].get_shape()[-1].value]))
         except Exception as e:
             logger.error('Creating module %s failed.', module['name'])
             raise e

@@ -76,17 +76,18 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
                     raise RuntimeError()
                 out += sequence
 
-        if dropout is not None:
-            out = tf.cond(
-                dropout > 0.0,
-                lambda: tf.nn.dropout(out, 1.0 - dropout, noise_shape=[tf.shape(out)[0], 1, tf.shape(out)[-1]]),
-                lambda: out)
+            if dropout is not None:
+                print('DING')
+                out = tf.cond(
+                    tf.greater(dropout, 0.0),
+                    lambda: tf.nn.dropout(out, 1.0 - dropout, noise_shape=[tf.shape(out)[0], 1, tf.shape(out)[-1]]),
+                    lambda: out)
     else:
         out = encoder(sequence, seq_length, repr_dim, module, num_layers - 1, reuse, residual,
-                      activation, layer_norm, name, **kwargs)
+                      activation, layer_norm, name, dropout=dropout, **kwargs)
 
         out = encoder(out, seq_length, repr_dim, module, 1, reuse, residual, activation, layer_norm,
-                      name + str(num_layers - 1), **kwargs)
+                      name + str(num_layers - 1), dropout=dropout, **kwargs)
 
     return out
 
