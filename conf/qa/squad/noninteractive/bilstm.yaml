@@ -14,4 +14,3 @@ encoder:
     with_projection: True
     residual: True
     num_layers: 1
-    dropout: True

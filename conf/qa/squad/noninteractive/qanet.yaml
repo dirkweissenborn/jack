@@ -18,7 +18,6 @@ encoder_block: &encoder_block
     num_layers: 4
     residual: True
     layer_norm: True
-    dropout: True
 
   - input: 'text'
     output: 'text_self'

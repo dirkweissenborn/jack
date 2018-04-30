@@ -369,7 +369,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         prev_segm_probs = prev_segm_probs if i > 0 else None
                         segms = bow_start_end_segm_encoder(segms, length, repr_dim, segm_probs, mask=prev_segm_probs)
 
-                        segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
+                        # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                         representations.append(segms)
 
             return representations
@@ -380,9 +380,10 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
         # computing single time attention over question
         encoded_question = tf.concat(encoded_question, 2)
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
-        question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
+        question_state = tf.einsum('ij,ijk->ik', question_attention_weights, encoded_question)
         question_state = tf.gather(question_state, tensors.support2question)
         question_state = tf.split(question_state, len(encoded_support), 1)
+        all_start_scores, all_end_scores = [], []
         with tf.variable_scope('prediction'):
             for i, (q, s) in enumerate(zip(question_state, encoded_support)):
                 with tf.variable_scope(str(i)) as vs:
@@ -393,12 +394,12 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                     hidden_start, hidden_end = tf.split(hidden, 2, 2)
                     support_mask = misc.mask_for_lengths(tensors.support_length)
                     start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
-                    start_scores = start_scores + support_mask
+                    all_start_scores.append(start_scores + support_mask)
                     end_scores = tf.einsum('ik,ijk->ij', question_hidden_end, hidden_end)
-                    end_scores = end_scores + support_mask
+                    all_end_scores.append(end_scores + support_mask)
 
         start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
-            compute_spans(start_scores, end_scores, tensors.answer2support, tensors.is_eval,
+            compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
                           tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
         span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
