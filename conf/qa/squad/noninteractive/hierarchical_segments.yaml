@@ -3,10 +3,11 @@ seed: 1337
 
 repr_dim: 256
 dropout: 0.2
-learning_rate: 0.0005
+with_wiq: False
+is_interactive: False
 
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
 
 num_layers: 1
-is_interactive: False
+
