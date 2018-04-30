@@ -5,6 +5,7 @@ repr_dim: 256
 dropout: 0.2
 learning_rate: 0.0005
 with_wiq: False
+is_interactive: False
 
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_bilstm'

@@ -9,6 +9,8 @@ with_wiq: False
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_qanet'
 
+is_interactive: False
+
 encoder_block: &encoder_block
   - input: 'text'
     module: 'positional_encoding'

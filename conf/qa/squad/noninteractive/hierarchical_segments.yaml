@@ -8,4 +8,5 @@ learning_rate: 0.0005
 reader: 'hierarchical_segments_qa_reader'
 name: 'hierarchical_segments_qa_reader'
 
-num_layers: 2
+num_layers: 1
+is_interactive: False
