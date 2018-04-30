@@ -362,7 +362,7 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                     with tf.variable_scope("layer" + str(i)):
                         prev_segm_probs = segm_probs
                         segm_probs, segm_logits = edge_detection_encoder(
-                            ctrl, 0, tensors.is_eval, mask=segm_probs, bias=-1)
+                            ctrl, 0, tensors.is_eval, mask=segm_probs, bias=1.0)
 
                         tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
 
@@ -372,29 +372,30 @@ class HierarchicalSegmentQAModule(AbstractXQAModelModule):
                         segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                         representations.append(segms)
 
-            return tf.add_n(representations)
+            return representations
 
         encoded_question = encoding(emb_question, tensors.question_length)
         encoded_support = encoding(emb_support, tensors.support_length, reuse=True, is_support=True)
 
         # computing single time attention over question
-        # encoded_question = tf.concat(encoded_question, 2)
+        encoded_question = tf.concat(encoded_question, 2)
         question_attention_weights = compute_question_weights(encoded_question, tensors.question_length)
         question_state = tf.reduce_sum(question_attention_weights * encoded_question, 1)
         question_state = tf.gather(question_state, tensors.support2question)
-        # question_state = tf.split(question_state, len(encoded_support), 1)
-        # for i, (q, s) in enumerate(zip(question_state, encoded_support)):
-        with tf.variable_scope('prediction') as vs:
-            question_hidden = tf.layers.dense(question_state, 2 * repr_dim, tf.nn.tanh, name="hidden")
-            question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
-            vs.reuse_variables()
-            hidden = tf.layers.dense(encoded_support, 2 * repr_dim, tf.nn.tanh, name="hidden")
-            hidden_start, hidden_end = tf.split(hidden, 2, 2)
-            support_mask = misc.mask_for_lengths(tensors.support_length)
-            start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
-            start_scores = start_scores + support_mask
-            end_scores = tf.einsum('ik,ijk->ij', question_hidden_end, hidden_end)
-            end_scores = end_scores + support_mask
+        question_state = tf.split(question_state, len(encoded_support), 1)
+        with tf.variable_scope('prediction'):
+            for i, (q, s) in enumerate(zip(question_state, encoded_support)):
+                with tf.variable_scope(str(i)) as vs:
+                    question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.tanh, name="hidden")
+                    question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
+                    vs.reuse_variables()
+                    hidden = tf.layers.dense(s, 2 * repr_dim, tf.nn.tanh, name="hidden")
+                    hidden_start, hidden_end = tf.split(hidden, 2, 2)
+                    support_mask = misc.mask_for_lengths(tensors.support_length)
+                    start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
+                    start_scores = start_scores + support_mask
+                    end_scores = tf.einsum('ik,ijk->ij', question_hidden_end, hidden_end)
+                    end_scores = end_scores + support_mask
 
         start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
             compute_spans(start_scores, end_scores, tensors.answer2support, tensors.is_eval,
