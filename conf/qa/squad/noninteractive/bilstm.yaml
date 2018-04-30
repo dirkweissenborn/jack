@@ -11,6 +11,6 @@ name: 'noninteractive_bilstm'
 encoder:
   - input: 'text'
     module: 'lstm'
-    dropout: True
-
-
+    with_projection: True
+    residual: True
+    num_layers: 1
