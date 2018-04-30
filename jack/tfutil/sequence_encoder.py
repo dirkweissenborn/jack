@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reuse=None, residual=False,
             activation=None, layer_norm=False, name='encoder', dropout=None, **kwargs):
     if num_layers == 1:
+        if layer_norm:
+            with tf.variable_scope('layernorm', reuse=False) as vs:
+                vs._reuse = False  # HACK
+                num_layernorms = sum(1 for v in vs.global_variables() if 'layernorm' in v.name)
+                sequence = tf.contrib.layers.layer_norm(sequence, scope=str(num_layernorms))
+
         with tf.variable_scope(name, reuse=reuse):
             if module == 'lstm':
                 out = bi_lstm(repr_dim, sequence, seq_length, **kwargs)
@@ -69,12 +75,6 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
                                                             out.get_shape()[-1].value))
                     raise RuntimeError()
                 out += sequence
-
-        if layer_norm:
-            with tf.variable_scope('layernorm', reuse=False) as vs:
-                vs._reuse = False  # HACK
-                num_layernorms = sum(1 for v in vs.global_variables() if 'layernorm' in v.name)
-                out = tf.contrib.layers.layer_norm(out, scope=str(num_layernorms))
 
         if dropout is not None:
             out = tf.cond(

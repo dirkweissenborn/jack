@@ -11,7 +11,6 @@ name: 'noninteractive_qanet'
 encoder_block: &encoder_block
   - input: 'text'
     module: 'positional_encoding'
-    layer_norm: True
 
   - input: 'text'
     module: 'conv_separable'
@@ -26,6 +25,7 @@ encoder_block: &encoder_block
     module: 'dense'
     repr_dim: 32
     activation: 'tanh'
+    layer_norm: True
 
   - input: 'text_self'
     module: 'self_attn'
@@ -34,6 +34,7 @@ encoder_block: &encoder_block
     scaled: True
     num_attn_heads: 8
     key_value_attn: True
+    layer_norm: True
 
   - input: 'text_self'
     module: 'dense'
@@ -42,11 +43,11 @@ encoder_block: &encoder_block
   - input: ['text', 'text_self']
     output: 'text'
     module: 'add'
-    layer_norm: True
 
   - input: 'text'
     module: 'dense'
     activation: 'tanh'
+    layer_norm: True
 
 
 encoder:
