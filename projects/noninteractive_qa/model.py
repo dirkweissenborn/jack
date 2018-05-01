@@ -345,7 +345,7 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
             with tf.variable_scope("layer" + str(i)):
                 prev_segm_probs = segm_probs
                 segm_probs, segm_logits = edge_detection_encoder(
-                    ctrl, repr_dim, tensors.is_eval, bias=-1.0)
+                    ctrl, repr_dim, tensors.is_eval)
                 if prev_segm_probs is not None:
                     segm_probs = tf.maximum(prev_segm_probs, segm_probs)
 
