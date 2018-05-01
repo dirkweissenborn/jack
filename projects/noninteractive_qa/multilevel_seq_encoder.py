@@ -110,6 +110,9 @@ def controller(sequence, length, controller_config, repr_dim, is_eval):
 
 def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize=False, transform=True,
                      activation=tf.nn.relu):
+    sequence = tf.layers.dense(sequence, repr_dim, activation,
+                               name='bow_segm_dense') if transform else sequence
+
     segm_contributions = intra_segm_contributions(segm_ends, length)
     if mask is not None:
         segm_contributions *= tf.transpose(mask, [0, 2, 1])
@@ -119,10 +122,7 @@ def bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None, normalize
         bow_num = tf.matmul(segm_contributions, tf.ones_like(segm_ends))
         sequence /= (bow_num + 1e-6)
 
-    seq_transformed = tf.layers.dense(sequence, repr_dim, activation,
-                                      name='bow_segm_dense') if transform else sequence
-
-    return seq_transformed
+    return sequence
 
 
 def weighted_bow_segm_encoder(sequence, length, repr_dim, segm_ends, mask=None):
