@@ -80,11 +80,11 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             vs.reuse_variables()
             encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
-        if shared_resources.config.get('is_interactive'):
-            encoded_question = tf.concat(encoded_question_list, 2)
+        encoded_question = tf.concat(encoded_question_list, 2)
+        for i in range(shared_resources.config.get('num_interactive', 0)):
             encoded_support = tf.concat(encoded_support_list, 2)
 
-            with tf.variable_scope('attention'):
+            with tf.variable_scope('attention', reuse=i > 0):
                 diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
                                        initializer=tf.zeros_initializer())
                 diag = tf.nn.sigmoid(diag)
@@ -336,7 +336,6 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
         dropout = shared_resources.config.get("dropout", 0.0)
         representations = list()
         segm_probs = None
-        segms = emb
         # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
         ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
         representations.append(emb)
@@ -346,13 +345,13 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
             with tf.variable_scope("layer" + str(i)):
                 prev_segm_probs = segm_probs
                 segm_probs, segm_logits = edge_detection_encoder(
-                    ctrl, repr_dim, tensors.is_eval, mask=segm_probs, bias=-1.0)
+                    ctrl, repr_dim, tensors.is_eval, bias=-1.0)
+                if prev_segm_probs is not None:
+                    segm_probs = tf.maximum(prev_segm_probs, segm_probs)
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-
-                prev_segm_probs = prev_segm_probs if i > 0 else None
                 segms = bow_segm_encoder(
-                    segms, length, repr_dim, segm_probs, mask=prev_segm_probs, normalize=True)
+                    emb, length, repr_dim, segm_probs, normalize=True)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)
