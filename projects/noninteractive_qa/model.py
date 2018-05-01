@@ -351,7 +351,7 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                 segms = bow_segm_encoder(
-                    emb, length, repr_dim, segm_probs, normalize=True)
+                    emb, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)
