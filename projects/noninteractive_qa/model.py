@@ -9,7 +9,7 @@ from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_
 from jack.tfutil import misc, attention
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
-from jack.tfutil.sequence_encoder import gated_linear_convnet
+from jack.tfutil.sequence_encoder import gated_linear_convnet, convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
 
@@ -338,6 +338,7 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
         segm_probs = None
         # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
         ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        #ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
         representations.append(emb)
         representations.append(ctrl)
 
@@ -350,8 +351,8 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                     segm_probs = tf.maximum(prev_segm_probs, segm_probs)
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-                segms = bow_segm_encoder(
-                    emb, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)
+                segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True,
+                                         activation=tf.nn.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)
