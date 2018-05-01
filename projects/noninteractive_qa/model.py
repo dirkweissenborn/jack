@@ -342,6 +342,8 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
         representations.append(emb)
         representations.append(ctrl)
 
+        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("layer" + str(i)):
                 prev_segm_probs = segm_probs
@@ -349,6 +351,10 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                     ctrl, repr_dim, tensors.is_eval)
                 if prev_segm_probs is not None:
                     segm_probs = tf.maximum(prev_segm_probs, segm_probs)
+
+                segm_probs = tf.cond(step >= 1000 * i,
+                                     lambda: segm_probs,
+                                     lambda: tf.stop_gradient(segm_probs))
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                 segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True,
