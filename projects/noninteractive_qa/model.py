@@ -369,10 +369,10 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
     question_state = tf.split(question_state, len(encoded_support), 1)
     for i, (q, s) in enumerate(zip(question_state, encoded_support)):
         with tf.variable_scope('prediction' + str(i)) as vs:
-            question_hidden = tf.layers.dense(q, 2 * repr_dim, name="hidden")
+            question_hidden = tf.layers.dense(q, 2 * repr_dim, tf.nn.tanh, name="hidden")
             question_hidden_start, question_hidden_end = tf.split(question_hidden, 2, 1)
             vs.reuse_variables()
-            hidden = tf.layers.dense(s, 2 * repr_dim, name="hidden")
+            hidden = tf.layers.dense(s, 2 * repr_dim, tf.nn.tanh, name="hidden")
             hidden_start, hidden_end = tf.split(hidden, 2, 2)
             support_mask = misc.mask_for_lengths(tensors.support_length)
             start_scores = tf.einsum('ik,ijk->ij', question_hidden_start, hidden_start)
