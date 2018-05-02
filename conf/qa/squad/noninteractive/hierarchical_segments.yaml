@@ -3,6 +3,8 @@ seed: 1337
 
 repr_dim: 256
 dropout: 0.2
+learning_rate: 0.0005
+learning_rate_decay: 0.8
 with_wiq: False
 num_interactive: 0
 
