@@ -16,9 +16,9 @@ def interaction_layer(seq1, seq1_length, seq2, seq2_length, seq1_to_seq2, seq2_t
         if module == 'attention_matching':
             out = attention_matching_layer(seq1, seq1_length, seq2, seq2_length, seq2_to_seq1, **kwargs)
         elif module == 'bidaf':
-            out = bidaf_layer(seq1, seq1_length, seq2, seq2_length)
+            out = bidaf_layer(seq1, seq1_length, seq2, seq2_length, **kwargs)
         elif module == 'coattention':
-            if 'repr_dim' not in kwargs['encoder']:
+            if kwargs.get('encoder') and 'repr_dim' not in kwargs['encoder']:
                 kwargs['encoder']['repr_dim'] = repr_dim
             out = coattention_layer(
                 seq1, seq1_length, seq2, seq2_length, **kwargs)
@@ -30,7 +30,7 @@ def interaction_layer(seq1, seq1_length, seq2, seq2_length, seq1_to_seq2, seq2_t
     return out
 
 
-def bidaf_layer(seq1, seq1_length, seq2, seq2_length, seq2_to_seq1=None):
+def bidaf_layer(seq1, seq1_length, seq2, seq2_length, seq2_to_seq1=None, **kwargs):
     """Encodes seq1 conditioned on seq2, e.g., using word-by-word attention."""
     attn_scores, attn_probs, seq2_weighted = attention.diagonal_bilinear_attention(
         seq1, seq2, seq2_length, False, seq2_to_seq1=seq2_to_seq1)

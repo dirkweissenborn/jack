@@ -23,10 +23,6 @@ def answer_layer(encoded_question, question_length, encoded_support, support_len
         return conditional_answer_layer(
             repr_dim, encoded_question, question_length, encoded_support, support_length,
             correct_start, support2question, answer2support, is_eval, beam_size, max_span_size, bilinear=True)
-    elif module == 'conditional_bilinear':
-        return conditional_answer_layer(
-            repr_dim, encoded_question, question_length, encoded_support, support_length,
-            correct_start, support2question, answer2support, is_eval, beam_size, max_span_size, bilinear=True)
     elif module == 'bidaf':
         if 'repr_dim' not in encoder:
             encoder['repr_dim'] = repr_dim

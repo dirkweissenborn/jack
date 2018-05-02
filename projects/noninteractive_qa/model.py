@@ -5,7 +5,7 @@ This file contains FastQA specific modules and ports
 from jack.core import *
 from jack.readers.extractive_qa.tensorflow.abstract_model import AbstractXQAModelModule
 from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_state, compute_spans, \
-    compute_question_weights
+    compute_question_weights, answer_layer
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
@@ -13,15 +13,23 @@ from jack.tfutil.sequence_encoder import gated_linear_convnet
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
 
+_start_scores = TensorPort(tf.float32, [None, None], "additional_start_scores",
+                           "Represents start scores for each support sequence",
+                           "[S, max_num_tokens]")
+_end_scores = TensorPort(tf.float32, [None, None], "additional_end_scores",
+                         "Represents start scores for each support sequence",
+                         "[S, max_num_tokens]")
+
 
 class NonInteractiveQAModule(AbstractXQAModelModule):
-    # @property
-    # def training_input_ports(self) -> Sequence[TensorPort]:
-    #   return super().training_input_ports
+    @property
+    def training_input_ports(self) -> Sequence[TensorPort]:
+        return super().training_input_ports + [_start_scores, _end_scores]
 
-    # @property
-    # def output_ports(self) -> Sequence[TensorPort]:
-    #    return super().output_ports + [question_state_start_port, question_state_end_port]
+    @property
+    def output_ports(self) -> Sequence[TensorPort]:
+        return super().output_ports + [_start_scores, _end_scores]
+
     def encoder(self, shared_resources, emb, length, tensors):
         raise NotImplementedError()
 
@@ -80,10 +88,9 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             vs.reuse_variables()
             encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
-        encoded_question = tf.concat(encoded_question_list, 2)
+        encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
+        encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
         for i in range(shared_resources.config.get('num_interactive', 0)):
-            encoded_support = tf.concat(encoded_support_list, 2)
-
             with tf.variable_scope('attention', reuse=i > 0):
                 diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
                                        initializer=tf.zeros_initializer())
@@ -100,12 +107,44 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             with tf.variable_scope("encoder", reuse=True):
                 encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
-        tf.identity(tf.concat(encoded_question_list, 2), name='question_representation')
-
         start_scores, end_scores, span = _simple_answer_layer(
             encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
-        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
+        if shared_resources.config.get('is_interactive', False):
+            post_non_interactive_config = shared_resources.config['post_non_interactive']
+            encoded, lengths, mappings = modular_encoder(
+                post_non_interactive_config['encoder'],
+                {'question': encoded_question, 'support': encoded_support},
+                {'question': tensors.question_length, 'support': tensors.support_length},
+                {'question': None, 'support': tensors.support2question},
+                repr_dim, dropout, tensors.is_eval)
+            with tf.variable_scope('answer_layer'):
+                answer_layer_config = post_non_interactive_config['answer_layer']
+                encoded_question = encoded[answer_layer_config.get('question', 'question')]
+                encoded_support = encoded[answer_layer_config.get('support', 'support')]
+
+                if 'repr_dim' not in answer_layer_config:
+                    answer_layer_config['repr_dim'] = repr_dim
+                if 'max_span_size' not in answer_layer_config:
+                    answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
+                beam_size = tf.get_variable(
+                    'beam_size', initializer=shared_resources.config.get('beam_size', 1), dtype=tf.int32,
+                    trainable=False)
+                beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
+                beam_size_assign = beam_size.assign(beam_size_p)
+                self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
+
+                new_start_scores, new_end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
+                    answer_layer(encoded_question, lengths[answer_layer_config.get('question', 'question')],
+                                 encoded_support, lengths[answer_layer_config.get('support', 'support')],
+                                 mappings[answer_layer_config.get('support', 'support')],
+                                 tensors.answer2support, tensors.is_eval,
+                                 tensors.correct_start, beam_size=beam_size, **answer_layer_config)
+                span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
+            return TensorPort.to_mapping(self.output_ports,
+                                         (start_scores, end_scores, span, new_start_scores, new_end_scores))
+        else:
+            return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span, start_scores, end_scores))
 
     def create_training_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
@@ -113,8 +152,18 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             tensors.start_scores, tensors.end_scores, tensors.answer_span,
             tensors.answer2support, tensors.support2question,
             use_sum=shared_resources.config.get('loss', 'sum') == 'sum')
+
+        tf.summary.scalar('actual_training_loss', loss)
+
         if tf.get_collection(tf.GraphKeys.LOSSES):
             loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
+
+        if shared_resources.config.get('is_interactive', False):
+            non_interactive_loss = xqa_crossentropy_loss(
+                tensors.additional_start_scores, tensors.additional_end_scores, tensors.answer_span,
+                tensors.answer2support, tensors.support2question,
+                use_sum=shared_resources.config.get('loss', 'sum') == 'sum')
+            loss += non_interactive_loss
         return {Ports.loss: loss}
 
 
@@ -133,9 +182,9 @@ class NonInteractiveModularQAModule(NonInteractiveQAModule):
         encoded = modular_encoder(
             shared_resources.config['encoder'],
             {'text': emb}, {'text': length}, {},
-            repr_dim, dropout, tensors.is_eval)[0]['text']
+            repr_dim, dropout, tensors.is_eval)[0]
 
-        return [encoded]
+        return [emb] + [encoded[k] for k in encoded if k.startswith('output')]
 
 
 class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
@@ -358,11 +407,11 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                                      lambda: tf.stop_gradient(segm_probs))
 
                 if i > 0:
+                    mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
                     segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
                     prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
-                    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.maximum(
-                        0.0, 0.5 + prev_segm_probs_cum - segm_probs_cum *
-                             tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 1))))
+                    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
+                        0.0, (0.5 + prev_segm_probs_cum - segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                 segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)

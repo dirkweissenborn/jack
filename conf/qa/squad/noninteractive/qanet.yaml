@@ -7,16 +7,14 @@ learning_rate: 0.0005
 learning_rate_decay: 0.8
 with_wiq: False
 num_interactive: 0
-epochs: 20
+epochs: 15
+is_interactive: False
 
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_qanet'
 
 
 encoder_block: &encoder_block
-  - input: 'text'
-    module: 'positional_encoding'
-
   - input: 'text'
     module: 'conv_separable'
     conv_width: 7
@@ -48,15 +46,52 @@ encoder_block: &encoder_block
     output: 'text'
     module: 'add'
 
+
+encoder: &encoder
   - input: 'text'
-    module: 'dense'
-    activation: 'tanh'
-    layer_norm: True
+    module: 'positional_encoding'
 
-
-encoder:
   - module: 'repeat'
     num: 1
     reuse: False
     encoder: *encoder_block
 
+  - input: 'text'
+    output: 'output_1'
+    module: 'dense'
+    activation: 'tanh'
+    layer_norm: True
+
+
+post_non_interactive:
+  encoder:
+    - input: 'support'
+      dependent: 'question'
+      output: 'support_attn'
+      module: 'coattention'
+      attn_type: 'diagonal_bilinear'
+      concat: False
+
+    - input: ['support', 'support']
+      output: 'support_x2'
+      module: 'concat'
+
+    - input: ['support_x2', 'support_attn']
+      output: 'support_attn_mul'
+      module: 'mul'
+
+    - input: ['support', 'support_attn', 'support_attn_mul']
+      output: 'support'
+      module: 'concat'
+
+    - input: 'support'
+      output: 'text'
+      module: 'dense'
+      activation: 'tanh'
+
+    - *encoder
+
+  answer_layer:
+    support: 'text'
+    question: 'question'
+    module: 'bilinear'

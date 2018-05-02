@@ -7,14 +7,14 @@ learning_rate: 0.0005
 learning_rate_decay: 0.8
 with_wiq: False
 num_interactive: 0
-epochs: 20
+epochs: 12
 
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_bilstm'
 
 encoder:
   - input: 'text'
+    output: 'output_0'
     module: 'lstm'
     with_projection: True
-    residual: True
-    num_layers: 1
+

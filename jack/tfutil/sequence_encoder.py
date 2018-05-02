@@ -63,7 +63,7 @@ def encoder(sequence, seq_length, repr_dim=100, module='lstm', num_layers=1, reu
                         outs.append(attn)
                 out = tf.concat(outs, 2) if num_attn > 1 else outs[0]
             elif module == 'positional_encoding':
-                out = positional_encoding(sequence, seq_length, repr_dim)
+                out = positional_encoding(sequence, seq_length)
             else:
                 raise ValueError("Unknown encoder type: %s" % module)
 
@@ -216,7 +216,8 @@ def gated_linear_convnet(out_size, inputs, num_layers, conv_width=3, **kwargs):
     return output
 
 
-def positional_encoding(inputs, lengths, repr_dim, **kwargs):
+def positional_encoding(inputs, lengths, **kwargs):
+    repr_dim = inputs.get_shape()[-1].value
     pos = tf.reshape(tf.range(0.0, tf.to_float(tf.reduce_max(lengths)), dtype=tf.float32), [-1, 1])
     i = np.arange(0, repr_dim, 2, np.float32)
     denom = np.reshape(np.power(10000.0, i / repr_dim), [1, -1])
