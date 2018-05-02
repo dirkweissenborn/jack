@@ -91,7 +91,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                 # [B, S, Q]
                 attn_scores = tf.einsum('abc,adc->abd', encoded_support, encoded_question * diag)
                 attn_scores += tf.expand_dims(misc.mask_for_lengths(tensors.support_length), 2)
-                #attn_scores /= math.sqrt(float(encoded_question.get_shape()[-1].value))
+                # attn_scores /= math.sqrt(float(encoded_question.get_shape()[-1].value))
                 attn_prob = tf.nn.softmax(attn_scores, 1)
 
             question2support = tf.einsum('bsq,bqr->bsr', attn_prob, emb_question)
@@ -139,7 +139,6 @@ class NonInteractiveModularQAModule(NonInteractiveQAModule):
 
 
 class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
-
     def create_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
 
@@ -333,7 +332,6 @@ class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
 
 
 class HierarchicalSegmentQAModule(NonInteractiveQAModule):
-
     def encoder(self, shared_resources, emb, length, tensors):
         repr_dim = shared_resources.config["repr_dim"]
         dropout = shared_resources.config.get("dropout", 0.0)
@@ -341,7 +339,7 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
         segm_probs = None
         # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
         ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
-        #ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+        # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
         representations.append(emb)
         representations.append(ctrl)
 
@@ -363,8 +361,8 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                     segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
                     prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
                     tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.maximum(
-                        0.0, 0.5 + prev_segm_probs_cum - segm_probs_cum)))
-
+                        0.0, 0.5 + prev_segm_probs_cum - segm_probs_cum *
+                             tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 1))))
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                 segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)
@@ -399,9 +397,9 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
             all_start_scores.append(start_scores)
             all_end_scores.append(end_scores)
 
-    start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer =\
-            compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
-                         tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
+    start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
+        compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
+                      tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
     span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
     return start_scores, end_scores, span
 
