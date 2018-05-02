@@ -107,6 +107,16 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
 
+    def create_training_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+        loss = xqa_crossentropy_loss(
+            tensors.start_scores, tensors.end_scores, tensors.answer_span,
+            tensors.answer2support, tensors.support2question,
+            use_sum=shared_resources.config.get('loss', 'sum') == 'sum')
+        if tf.get_collection(tf.GraphKeys.LOSSES):
+            loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
+        return {Ports.loss: loss}
+
 
 class NonInteractiveModularQAModule(NonInteractiveQAModule):
     # @property
@@ -348,6 +358,13 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                 segm_probs = tf.cond(step >= 1000 * i,
                                      lambda: segm_probs,
                                      lambda: tf.stop_gradient(segm_probs))
+
+                if i > 0:
+                    segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
+                    prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
+                    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.maximum(
+                        0.0, 0.5 + prev_segm_probs_cum - segm_probs_cum)))
+
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                 segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)
