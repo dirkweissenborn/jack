@@ -517,12 +517,12 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
                 tf.identity(probs, name='selection_probs_' + str(i))
 
                 s = tf.shape(states)
-                segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], repr_dim * num_heads]), repr_dim, tf.tanh)
+                new_segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], repr_dim * num_heads]), repr_dim, tf.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
-                representations.append(segms)
+                representations.append(new_segms)
 
-                segms += emb
+                segms += new_segms
 
         return representations
 
