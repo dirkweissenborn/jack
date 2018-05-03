@@ -90,25 +90,33 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
         encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
-        for i in range(shared_resources.config.get('num_interactive', 0)):
-            with tf.variable_scope('attention', reuse=i > 0):
-                diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
-                                       initializer=tf.zeros_initializer())
-                diag = tf.nn.sigmoid(diag)
-                # [B, S, Q]
-                attn_scores = tf.einsum('abc,adc->abd', encoded_support, encoded_question * diag)
-                attn_scores += tf.expand_dims(misc.mask_for_lengths(tensors.support_length), 2)
-                # attn_scores /= math.sqrt(float(encoded_question.get_shape()[-1].value))
-                attn_prob = tf.nn.softmax(attn_scores, 1)
-
-            question2support = tf.einsum('bsq,bqr->bsr', attn_prob, emb_question)
-
-            emb_support += question2support
-            with tf.variable_scope("encoder", reuse=True):
-                encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
         start_scores, end_scores, span = _simple_answer_layer(
             encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+
+        if shared_resources.config.get('num_interactive', 0):
+            for i in range(shared_resources.config.get('num_interactive', 0)):
+                with tf.variable_scope('attention', reuse=i > 0):
+                    diag = tf.get_variable('attn_weight', [1, 1, encoded_question.get_shape()[-1].value], tf.float32,
+                                           initializer=tf.zeros_initializer())
+                    diag = tf.nn.sigmoid(diag)
+                    # [B, S, Q]
+                    attn_scores = tf.einsum('abc,adc->abd', encoded_support, encoded_question * diag)
+                    attn_scores += tf.expand_dims(misc.mask_for_lengths(tensors.support_length), 2)
+                    # attn_scores /= math.sqrt(float(encoded_question.get_shape()[-1].value))
+                    attn_prob = tf.nn.softmax(attn_scores, 1)
+
+                question2support = tf.einsum('bsq,bqr->bsr', attn_prob, emb_question)
+
+                with tf.variable_scope("encoder", reuse=True):
+                    encoded_support_list = self.encoder(shared_resources, emb_support + question2support,
+                                                        tensors.support_length, tensors)
+
+            new_start_scores, new_end_scores, span = _simple_answer_layer(
+                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+
+            return TensorPort.to_mapping(self.output_ports,
+                                         (start_scores, end_scores, span, new_start_scores, new_end_scores))
 
         if shared_resources.config.get('is_interactive', False):
             post_non_interactive_config = shared_resources.config['post_non_interactive']
@@ -142,7 +150,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                  tensors.correct_start, beam_size=beam_size, **answer_layer_config)
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
             return TensorPort.to_mapping(self.output_ports,
-                                         (start_scores, end_scores, span, new_start_scores, new_end_scores))
+                                         (new_start_scores, new_end_scores, span, start_scores, end_scores))
         else:
             return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span, start_scores, end_scores))
 
