@@ -126,6 +126,12 @@ def hierarchical_dependency_qa_reader(resources_or_conf: Union[dict, SharedResou
 
 
 @extractive_qa_reader
+def hierarchical_selfattn_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
+    from projects.noninteractive_qa.model import HierarchicalSelfAttnQAModule
+    return _tf_extractive_qa_reader(HierarchicalSelfAttnQAModule, resources_or_conf)
+
+
+@extractive_qa_reader
 def non_interactive_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
     from projects.noninteractive_qa.model import NonInteractiveModularQAModule
     return _tf_extractive_qa_reader(NonInteractiveModularQAModule, resources_or_conf)

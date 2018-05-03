@@ -118,7 +118,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                     encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
             return TensorPort.to_mapping(self.output_ports,
-                                         (start_scores, end_scores, span, new_start_scores, new_end_scores))
+                                         (new_start_scores, new_end_scores, span, start_scores, end_scores))
 
         if shared_resources.config.get('is_interactive', False):
             post_non_interactive_config = shared_resources.config['post_non_interactive']
@@ -471,6 +471,54 @@ class HierarchicalDependencyQAModule(NonInteractiveQAModule):
                 segms, probs, logits = segment_selection_encoder(
                     length, repr_dim, segm_probs, prev_segm_probs, emb, ctrl, tensors.is_eval)
                 tf.identity(probs, name='selection_probs' + str(i))
+
+                # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
+                representations.append(segms)
+
+        return representations
+
+
+class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
+    def encoder(self, shared_resources, emb, length, tensors):
+        repr_dim = shared_resources.config["repr_dim"]
+        dropout = shared_resources.config.get("dropout", 0.0)
+        representations = list()
+        segm_probs = None
+        # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
+        ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+        representations.append(emb)
+        representations.append(ctrl)
+
+        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+
+        mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+        segms = emb
+        for i in range(shared_resources.config['num_layers']):
+            with tf.variable_scope("layer" + str(i)):
+                prev_segm_probs = segm_probs
+                segm_probs, segm_logits = edge_detection_encoder(
+                    ctrl, repr_dim, tensors.is_eval)
+
+                # segm_probs = tf.cond(step >= 1000 * i,
+                #                     lambda: segm_probs,
+                #                     lambda: tf.stop_gradient(segm_probs))
+
+                if i > 0:
+                    segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
+                    prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
+                    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
+                        0.0, (0.5 + segm_probs_cum - prev_segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
+
+                tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
+                retrieved = []
+                for head in range(shared_resources.config.get('num_heads', 8)):
+                    with tf.variable_scope("head" + str(head)):
+                        scores, probs, state = segment_self_attention(segms, length, segm_probs)
+                        retrieved.append(state)
+                        tf.identity(probs, name='selection_probs_' + str(i) + '_' + 'head')
+
+                segms = tf.layers.dense(tf.concat(retrieved, 2), repr_dim, tf.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)

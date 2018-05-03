@@ -1,6 +1,9 @@
+import math
+
 import numpy as np
 import tensorflow as tf
 
+from jack.tfutil import attention
 from jack.tfutil.modular_encoder import modular_encoder
 
 
@@ -327,6 +330,32 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
         assoc_probs.append(probs)
 
     return slots, assoc_probs
+
+
+def segment_self_attention(seq, length, segm_probs, scaled=True, key_value_attn=True):
+    query, key, value = attention._get_query_key_value(seq, seq, key_value_attn)
+    attn_scores = tf.einsum('abc,adc->abd', query, key)
+    attn_scores += tf.layers.dense(query, 1, use_bias=False)
+    attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 2, 1])
+    if scaled:
+        attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
+
+    # [B, L, L]
+    associations = intra_segm_contributions(segm_probs, length)
+    attn_scores += tf.log(associations + 1e-10)
+
+    return attention.apply_attention(attn_scores, value, length, True, with_sentinel=True)
+
+
+def _get_query_key_value(seq1, seq2, key_value_attn):
+    if key_value_attn:
+        with tf.variable_scope('key_value_projection') as vs:
+            key = tf.layers.dense(seq2, seq2.get_shape()[-1].value, name='key')
+            value = tf.layers.dense(seq2, seq2.get_shape()[-1].value, name='value')
+            query = tf.layers.dense(seq1, seq1.get_shape()[-1].value, name='query')
+        return query, key, value
+    else:
+        return seq1, seq2, seq2
 
 
 class PropagationCell(tf.nn.rnn_cell.RNNCell):
