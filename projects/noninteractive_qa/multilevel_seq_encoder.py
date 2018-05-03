@@ -332,19 +332,45 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(seq, length, segm_probs, scaled=True, key_value_attn=True):
-    query, key, value = attention._get_query_key_value(seq, seq, key_value_attn)
-    attn_scores = tf.einsum('abc,adc->abd', query, key)
-    attn_scores += tf.layers.dense(query, 1, use_bias=False)
-    attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 2, 1])
+def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key_value_attn=True, num_heads=1,
+                           edge_probs=None):
+    edge_logits = None
+    if edge_probs is None:
+        # [B, L, H]
+        edge_logits = tf.layers.dense(tf.layers.dense(ctrl, 16, tf.nn.relu, name='edge_logits_hidden'),
+                                      num_heads, name='edge_logits')
+        edge_probs = tf.cond(is_eval,
+                             lambda: tf.round(tf.sigmoid(edge_logits)),
+                             lambda: gumbel_sigmoid(edge_logits))
+
+    batch_size = tf.shape(seq)[0]
+    with tf.variable_scope('key_value_projection') as vs:
+        key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
+        query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
+                           [batch_size, -1, num_heads, key_dim])
+
+    # [B, L, L, H]
+    attn_scores = tf.einsum('abhc,adhc->abdh', query, key)
+    attn_scores += tf.transpose(tf.layers.dense(query, 1, use_bias=False), [0, 1, 3, 2])
+    attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 3, 1, 2])
     if scaled:
         attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
 
     # [B, L, L]
-    associations = intra_segm_contributions(segm_probs, length)
-    attn_scores += tf.log(associations + 1e-10)
+    all_scores = []
+    all_probs = []
+    all_states = []
+    for i in range(num_heads):
+        with tf.variable_scope('head_%d' % i):
+            associations = intra_segm_contributions(edge_probs[:, :, i:i + 1], length)
+            scores, probs, states = attention.apply_attention(
+                attn_scores[:, :, :, i] + tf.log(associations + 1e-10), seq, length, True, with_sentinel=True)
 
-    return attention.apply_attention(attn_scores, value, length, True, with_sentinel=True)
+            all_scores.append(scores)
+            all_probs.append(probs)
+            all_states.append(states)
+
+    return all_scores, all_probs, all_states, edge_probs, edge_logits
 
 
 def _get_query_key_value(seq1, seq2, key_value_attn):

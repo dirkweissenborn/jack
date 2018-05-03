@@ -9,7 +9,7 @@ from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
-from jack.tfutil.sequence_encoder import gated_linear_convnet
+from jack.tfutil.sequence_encoder import gated_linear_convnet, encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
 
@@ -484,8 +484,8 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         dropout = shared_resources.config.get("dropout", 0.0)
         representations = list()
         segm_probs = None
-        # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
-        ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        ctrl = encoder(emb, length, repr_dim, module='conv_separable', num_layers=1, conv_width=5)
+        # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
         # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
         representations.append(emb)
         representations.append(ctrl)
@@ -495,33 +495,30 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
         segms = emb
         for i in range(shared_resources.config['num_layers']):
-            with tf.variable_scope("layer" + str(i)):
-                prev_segm_probs = segm_probs
-                segm_probs, segm_logits = edge_detection_encoder(
-                    ctrl, repr_dim, tensors.is_eval)
-
+            with tf.variable_scope("self_attn", reuse=i > 0):
                 # segm_probs = tf.cond(step >= 1000 * i,
                 #                     lambda: segm_probs,
                 #                     lambda: tf.stop_gradient(segm_probs))
 
-                if i > 0:
-                    segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
-                    prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
-                    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
-                        0.0, (0.5 + segm_probs_cum - prev_segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
+                # if i > 0:
+                #    segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
+                #    prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
+                #    tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
+                #        0.0, (0.5 + segm_probs_cum - prev_segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
 
-                tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-                retrieved = []
-                for head in range(shared_resources.config.get('num_heads', 8)):
-                    with tf.variable_scope("head" + str(head)):
-                        scores, probs, state = segment_self_attention(segms, length, segm_probs)
-                        retrieved.append(state)
-                        tf.identity(probs, name='selection_probs_' + str(i) + '_' + 'head')
+                scores, probs, states, segm_probs, segm_logits = segment_self_attention(
+                    ctrl, segms, length, tensors.is_eval, 64, scaled=True, key_value_attn=True,
+                    num_heads=shared_resources.config['num_heads'], edge_probs=segm_probs)
+                if i == 0:
+                    tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+                tf.identity(tf.stack(probs), name='selection_probs_' + str(i))
 
-                segms = tf.layers.dense(tf.concat(retrieved, 2), repr_dim, tf.tanh)
+                segms = tf.layers.dense(tf.concat(states, 2), repr_dim, tf.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)
+
+                segms += emb
 
         return representations
 
