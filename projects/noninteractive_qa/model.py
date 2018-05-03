@@ -482,7 +482,7 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
     def encoder(self, shared_resources, emb, length, tensors):
         repr_dim = shared_resources.config["repr_dim"]
         key_dim = shared_resources.config.get("key_dim", 64)
-        value_dim = shared_resources.config.get("value_dim", 64)
+        value_dim = shared_resources.config.get("value_dim")
         num_heads = shared_resources.config['num_heads']
         dropout = shared_resources.config.get("dropout", 0.0)
         representations = list()
@@ -495,7 +495,7 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("self_attn", reuse=i > 0):
                 scores, attn_probs, states, segm_probs, segm_logits = segment_self_attention(
-                    state, length, tensors.is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
+                    state, state, length, tensors.is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
                     num_heads=num_heads, edge_probs=segm_probs, attn_probs=attn_probs)
                 if i == 0:
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs')

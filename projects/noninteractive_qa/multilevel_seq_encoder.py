@@ -331,12 +331,12 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(seq, length, is_eval, key_dim, value_dim=None, scaled=True, key_value_attn=True,
+def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, scaled=True, key_value_attn=True,
                            num_heads=1, edge_probs=None, attn_probs=None):
     edge_logits = None
     if edge_probs is None:
         # [B, L, H]
-        edge_logits = tf.layers.dense(tf.layers.dense(seq, 16, tf.nn.relu, name='edge_logits_hidden'),
+        edge_logits = tf.layers.dense(tf.layers.dense(ctrl, 16, tf.nn.relu, name='edge_logits_hidden'),
                                       num_heads, name='edge_logits')
         edge_probs = tf.cond(is_eval,
                              lambda: tf.round(tf.sigmoid(edge_logits)),
@@ -352,9 +352,9 @@ def segment_self_attention(seq, length, is_eval, key_dim, value_dim=None, scaled
                            [batch_size, -1, num_heads, value_dim])
     attn_scores = None
     if attn_probs is None:
-        key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
+        key = tf.reshape(tf.layers.dense(ctrl, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
 
-        query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
+        query = tf.reshape(tf.layers.dense(ctrl, key_dim * num_heads, name='query'),
                            [batch_size, -1, num_heads, key_dim])
 
         # [B, L, L, H]
