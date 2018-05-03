@@ -481,6 +481,9 @@ class HierarchicalDependencyQAModule(NonInteractiveQAModule):
 class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
     def encoder(self, shared_resources, emb, length, tensors):
         repr_dim = shared_resources.config["repr_dim"]
+        key_dim = shared_resources.config.get("key_dim", 64)
+        value_dim = shared_resources.config.get("value_dim", 64)
+        num_heads = shared_resources.config['num_heads']
         dropout = shared_resources.config.get("dropout", 0.0)
         representations = list()
         segm_probs = None
@@ -493,7 +496,7 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
 
         mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
-        segms = emb
+        segms = emb + ctrl
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("self_attn", reuse=i > 0):
                 # segm_probs = tf.cond(step >= 1000 * i,
@@ -507,13 +510,14 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
                 #        0.0, (0.5 + segm_probs_cum - prev_segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
 
                 scores, probs, states, segm_probs, segm_logits = segment_self_attention(
-                    ctrl, segms, length, tensors.is_eval, 64, scaled=True, key_value_attn=True,
-                    num_heads=shared_resources.config['num_heads'], edge_probs=segm_probs)
+                    ctrl, segms, length, tensors.is_eval, 64, 64, scaled=True, key_value_attn=True,
+                    num_heads=num_heads, edge_probs=segm_probs)
                 if i == 0:
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-                tf.identity(tf.stack(probs), name='selection_probs_' + str(i))
+                tf.identity(probs, name='selection_probs_' + str(i))
 
-                segms = tf.layers.dense(tf.concat(states, 2), repr_dim, tf.tanh)
+                s = tf.shape(states)
+                segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], value_dim * num_heads]), repr_dim, tf.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)

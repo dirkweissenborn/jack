@@ -3,7 +3,6 @@ import math
 import numpy as np
 import tensorflow as tf
 
-from jack.tfutil import attention
 from jack.tfutil.modular_encoder import modular_encoder
 
 
@@ -332,7 +331,8 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key_value_attn=True, num_heads=1,
+def segment_self_attention(ctrl, seq, length, is_eval, value_dim, key_dim, scaled=True, key_value_attn=True,
+                           num_heads=1,
                            edge_probs=None):
     edge_logits = None
     if edge_probs is None:
@@ -346,6 +346,8 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key
     batch_size = tf.shape(seq)[0]
     with tf.variable_scope('key_value_projection') as vs:
         key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
+        value = tf.reshape(tf.layers.dense(seq, value_dim * num_heads, name='value'),
+                           [batch_size, -1, num_heads, value_dim])
         query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
                            [batch_size, -1, num_heads, key_dim])
 
@@ -356,21 +358,17 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key
     if scaled:
         attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
 
-    # [B, L, L]
-    all_scores = []
-    all_probs = []
-    all_states = []
-    for i in range(num_heads):
-        with tf.variable_scope('head_%d' % i):
-            associations = intra_segm_contributions(edge_probs[:, :, i:i + 1], length)
-            scores, probs, states = attention.apply_attention(
-                attn_scores[:, :, :, i] + tf.log(associations + 1e-10), seq, length, True, with_sentinel=True)
+    # exclude attending to state itself
+    attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
-            all_scores.append(scores)
-            all_probs.append(probs)
-            all_states.append(states)
+    s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+    s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
+    attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
+    attn_probs = attn_probs[:, :, 1:]
 
-    return all_scores, all_probs, all_states, edge_probs, edge_logits
+    attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
+
+    return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
 
 
 def _get_query_key_value(seq1, seq2, key_value_attn):
