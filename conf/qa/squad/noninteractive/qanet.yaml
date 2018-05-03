@@ -26,7 +26,7 @@ encoder_block: &encoder_block
     output: 'text_self'
     module: 'dense'
     repr_dim: 32
-    activation: 'tanh'
+    activation: 'relu'
     layer_norm: True
 
   - input: 'text_self'
