@@ -331,8 +331,35 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, scaled=True, key_value_attn=True,
-                           num_heads=1, edge_probs=None, attn_probs=None):
+def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, scaled=True,
+                           num_heads=1, attn_probs=None):
+    batch_size = tf.shape(seq)[0]
+    if value_dim is None:
+        value = seq
+    else:
+        value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, tf.nn.relu, name='value'),
+                           [batch_size, -1, num_heads, value_dim])
+    attn_scores = None
+    edge_probs, edge_logits = None, None
+    if attn_probs is None:
+        attn_scores, edge_probs, edge_logits = segment_self_attention_scores(
+            ctrl, seq, length, is_eval, key_dim, scaled=scaled, num_heads=num_heads)
+
+        s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+        s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
+        attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
+        attn_probs = attn_probs[:, :, 1:]
+
+    if value_dim is None:
+        attn_states = tf.einsum('abdh,adc->abhc', attn_probs, value)
+    else:
+        attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
+
+    return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
+
+
+def segment_self_attention_scores(ctrl, seq, length, is_eval, key_dim, scaled=True,
+                                  num_heads=1, edge_probs=None, attn_probs=None):
     edge_logits = None
     if edge_probs is None:
         # [B, L, H]
@@ -345,11 +372,6 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, 
     batch_size = tf.shape(seq)[0]
     l = tf.shape(seq)[1]
 
-    if value_dim is None:
-        value = seq
-    else:
-        value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, tf.nn.relu, name='value'),
-                           [batch_size, -1, num_heads, value_dim])
     attn_scores = None
     if attn_probs is None:
         key = tf.reshape(tf.layers.dense(ctrl, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
@@ -375,17 +397,7 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, 
         # exclude attending to state itself
         # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
-        s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
-        s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
-        attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
-        attn_probs = attn_probs[:, :, 1:]
-
-    if value_dim is None:
-        attn_states = tf.einsum('abdh,adc->abhc', attn_probs, value)
-    else:
-        attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
-
-    return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
+    return attn_scores, edge_probs, edge_logits
 
 
 def _get_query_key_value(seq1, seq2, key_value_attn):

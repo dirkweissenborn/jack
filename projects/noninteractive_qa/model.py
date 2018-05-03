@@ -509,6 +509,51 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         return [state]
 
 
+
+class HierarchicalGCNQAModule(NonInteractiveQAModule):
+    def encoder(self, shared_resources, emb, length, tensors):
+        repr_dim = shared_resources.config["repr_dim"]
+        key_dim = shared_resources.config.get("key_dim", 64)
+        value_dim = shared_resources.config.get("value_dim")
+        num_heads = shared_resources.config['num_heads']
+        dropout = shared_resources.config.get("dropout", 0.0)
+        representations = list()
+        segm_probs = None
+        attn_probs = None
+        state = encoder(emb, length, repr_dim, module='conv_glu', num_layers=1, conv_width=5, residual=True)
+        # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+
+        with tf.variable_scope('ajacency'):
+            scores, segm_probs, segm_logits = segment_self_attention_scores(
+                state, state, length, tensors.is_eval, key_dim, num_heads=num_heads)
+
+            A = gumbel_sigmoid(scores)
+            # [B*H, L, L]
+            l = tf.shape(state)[1]
+            A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
+
+            D_sqrt = tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2)))
+
+            A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
+            # [B, L, L, H]
+            A_trans = tf.transpose(tf.reshape(A_trans, [-1, num_heads, l, l]), [0,2,3,1])
+
+        tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+        tf.identity(tf.sigmoid(scores), name='selection_probs')
+
+
+        for i in range(shared_resources.config['num_layers']):
+            with tf.variable_scope("GCN_" + str(i)):
+                new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')
+                new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
+                new_state = tf.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state) / float(num_heads))
+
+                state += new_state
+
+        return [state]
+
+
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
     all_start_scores = []
     all_end_scores = []
