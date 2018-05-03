@@ -395,8 +395,7 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
         step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
 
         mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
-        probs = [None] * shared_resources.config['num_layers']
-        for i in range(shared_resources.config['num_layers'] - 1, -1, -1):
+        for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("layer" + str(i)):
                 prev_segm_probs = segm_probs
                 segm_probs, segm_logits = edge_detection_encoder(
@@ -406,9 +405,9 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                 else:
                     prev_segm_probs = tf.zeros_like(segm_probs)
 
-                # segm_probs = tf.cond(step >= 1000 * i,
-                #                     lambda: segm_probs,
-                #                     lambda: tf.stop_gradient(segm_probs))
+                segm_probs = tf.cond(step >= 1000 * i,
+                                     lambda: segm_probs,
+                                     lambda: tf.stop_gradient(segm_probs))
 
                 segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
                 prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
@@ -416,16 +415,51 @@ class HierarchicalSegmentQAModule(NonInteractiveQAModule):
                     0.0, (0.5 + prev_segm_probs_cum - segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
 
                 tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
-                probs[i] = segm_probs
+                segms = bow_segm_encoder(ctrl, length, repr_dim, segm_probs, normalize=True, activation=tf.nn.tanh)
 
+                # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
+                representations.append(segms)
+
+        return representations
+
+
+class HierarchicalDependencyQAModule(NonInteractiveQAModule):
+    def encoder(self, shared_resources, emb, length, tensors):
+        repr_dim = shared_resources.config["repr_dim"]
+        dropout = shared_resources.config.get("dropout", 0.0)
+        representations = list()
+        segm_probs = None
+        # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
+        ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+        representations.append(emb)
+        representations.append(ctrl)
+
+        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+
+        mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+        segms = emb
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("layer" + str(i)):
-                if i > 0:
-                    segms = bow_segm_encoder(
-                        representations[-1], length, repr_dim, probs[i], mask=probs[i - 1], normalize=True,
-                        activation=tf.nn.tanh)
-                else:
-                    segms = bow_segm_encoder(emb, length, repr_dim, probs[i], normalize=True, activation=tf.nn.tanh)
+                prev_segm_probs = segm_probs
+                segm_probs, segm_logits = edge_detection_encoder(
+                    ctrl, repr_dim, tensors.is_eval)
+                if prev_segm_probs is not None:
+                    segm_probs = prev_segm_probs * segm_probs
+
+                # segm_probs = tf.cond(step >= 1000 * i,
+                #                     lambda: segm_probs,
+                #                     lambda: tf.stop_gradient(segm_probs))
+
+                # segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
+                # prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
+                # tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
+                #    0.0, (0.5 + prev_segm_probs_cum - segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
+
+                tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
+                segms, probs, logits = segment_selection_encoder(
+                    length, repr_dim, segm_probs, prev_segm_probs, segms, ctrl, tensors.is_eval)
+                tf.identity(probs, name='selection_probs' + str(i))
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)

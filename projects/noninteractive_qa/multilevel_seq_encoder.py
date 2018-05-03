@@ -201,7 +201,8 @@ def segment_selection_encoder(length, repr_dim, frame_probs, segm_probs, segms, 
     contributions = intra_segm_contributions(frame_probs, length)
 
     exps = tf.exp(logits)
-    exps *= segm_probs
+    if segm_probs is not None:
+        exps *= segm_probs
     # probs should not be bigger than 1
     summed_exps = tf.maximum(tf.matmul(contributions, exps), exps)
     if with_sentinel:

@@ -1,0 +1,16 @@
+parent_config: './conf/qa/squad/abstract_squad.yaml'
+seed: 1337
+
+repr_dim: 256
+dropout: 0.2
+learning_rate: 0.0005
+learning_rate_decay: 0.8
+with_wiq: False
+num_interactive: 0
+epochs: 15
+
+reader: 'hierarchical_dependency_qa_reader'
+name: 'hierarchical_dependency_qa_reader'
+
+num_layers: 1
+
