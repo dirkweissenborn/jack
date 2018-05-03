@@ -533,7 +533,7 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             l = tf.shape(state)[1]
             A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
 
-            D_sqrt = tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2)))
+            D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2)))
 
             A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
             # [B, L, L, H]
