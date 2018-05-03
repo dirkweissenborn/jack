@@ -488,7 +488,7 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         representations = list()
         segm_probs = None
         attn_probs = None
-        state = encoder(emb, length, repr_dim, module='conv_glu', num_layers=2, conv_width=5, residual=True)
+        state = encoder(emb, length, repr_dim, module='conv_glu', num_layers=1, conv_width=5, residual=True)
         # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
         # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
 
@@ -502,7 +502,7 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
                     tf.identity(attn_probs, name='selection_probs')
 
                 s = tf.shape(states)
-                new_state = tf.layers.dense(tf.reshape(states, [s[0], s[1], value_dim * num_heads]),
+                new_state = tf.layers.dense(tf.reshape(states, [s[0], s[1], states.get_shape()[-1].value * num_heads]),
                                             repr_dim, tf.tanh, name='self_attn_projection')
                 state += new_state
 
