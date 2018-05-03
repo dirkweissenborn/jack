@@ -528,16 +528,16 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             scores, segm_probs, segm_logits = segment_self_attention_scores(
                 state, state, length, tensors.is_eval, key_dim, num_heads=num_heads)
 
-            A = gumbel_sigmoid(scores)
+            A = tf.nn.sigmoid(scores)
             # [B*H, L, L]
             l = tf.shape(state)[1]
-            A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
+            #A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
 
-            D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2)))
+            D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
 
-            A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
+            A_trans = A / (1e-8 + tf.reduce_sum(A, axis=2, keep_dims=True)) #tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
             # [B, L, L, H]
-            A_trans = tf.transpose(tf.reshape(A_trans, [-1, num_heads, l, l]), [0,2,3,1])
+            #A_trans = tf.transpose(tf.reshape(A_trans, [-1, num_heads, l, l]), [0,2,3,1])
 
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
         tf.identity(tf.sigmoid(scores), name='selection_probs')
