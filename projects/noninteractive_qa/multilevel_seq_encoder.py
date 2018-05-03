@@ -370,7 +370,7 @@ def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True
         attn_scores += tf.log(associations + 1e-10)
 
         # exclude attending to state itself
-        # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
+        attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
         s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
         s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
