@@ -547,7 +547,7 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             with tf.variable_scope("GCN_" + str(i)):
                 new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')
                 new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
-                new_state = tf.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state) / float(num_heads))
+                new_state = tf.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state))
 
                 state += new_state
 
