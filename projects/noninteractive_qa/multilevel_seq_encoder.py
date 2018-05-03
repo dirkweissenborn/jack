@@ -374,7 +374,7 @@ def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True
     attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
     attn_probs = attn_probs[:, :, 1:]
 
-    attn_states = tf.einsum('abdh,adc->abhc', attn_probs, value)
+    attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
 
     return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
 
