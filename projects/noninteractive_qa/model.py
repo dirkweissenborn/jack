@@ -510,14 +510,14 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
                 #        0.0, (0.5 + segm_probs_cum - prev_segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(length)))
 
                 scores, probs, states, segm_probs, segm_logits = segment_self_attention(
-                    ctrl, segms, length, tensors.is_eval, 64, 64, scaled=True, key_value_attn=True,
+                    ctrl, segms, length, tensors.is_eval, key_dim, scaled=True, key_value_attn=True,
                     num_heads=num_heads, edge_probs=segm_probs)
                 if i == 0:
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                 tf.identity(probs, name='selection_probs_' + str(i))
 
                 s = tf.shape(states)
-                segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], value_dim * num_heads]), repr_dim, tf.tanh)
+                segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], repr_dim * num_heads]), repr_dim, tf.tanh)
 
                 # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
                 representations.append(segms)

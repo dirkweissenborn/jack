@@ -331,7 +331,7 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(ctrl, seq, length, is_eval, value_dim, key_dim, scaled=True, key_value_attn=True,
+def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key_value_attn=True,
                            num_heads=1,
                            edge_probs=None):
     edge_logits = None
@@ -346,8 +346,6 @@ def segment_self_attention(ctrl, seq, length, is_eval, value_dim, key_dim, scale
     batch_size = tf.shape(seq)[0]
     with tf.variable_scope('key_value_projection') as vs:
         key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
-        value = tf.reshape(tf.layers.dense(seq, value_dim * num_heads, name='value'),
-                           [batch_size, -1, num_heads, value_dim])
         query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
                            [batch_size, -1, num_heads, key_dim])
 
@@ -366,7 +364,7 @@ def segment_self_attention(ctrl, seq, length, is_eval, value_dim, key_dim, scale
     attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
     attn_probs = attn_probs[:, :, 1:]
 
-    attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
+    attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, seq)
 
     return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
 
