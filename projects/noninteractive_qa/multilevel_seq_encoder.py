@@ -331,13 +331,12 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
     return slots, assoc_probs
 
 
-def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key_value_attn=True,
-                           num_heads=1,
-                           edge_probs=None):
+def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
+                           num_heads=1, edge_probs=None):
     edge_logits = None
     if edge_probs is None:
         # [B, L, H]
-        edge_logits = tf.layers.dense(tf.layers.dense(ctrl, 16, tf.nn.relu, name='edge_logits_hidden'),
+        edge_logits = tf.layers.dense(tf.layers.dense(seq, 16, tf.nn.relu, name='edge_logits_hidden'),
                                       num_heads, name='edge_logits')
         edge_probs = tf.cond(is_eval,
                              lambda: tf.round(tf.sigmoid(edge_logits)),
@@ -347,6 +346,8 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key
     l = tf.shape(seq)[1]
     with tf.variable_scope('key_value_projection') as vs:
         key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
+        value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='value'),
+                           [batch_size, -1, num_heads, value_dim])
         query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
                            [batch_size, -1, num_heads, key_dim])
 
@@ -366,14 +367,14 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, scaled=True, key
     attn_scores += tf.log(associations + 1e-10)
 
     # exclude attending to state itself
-    attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
+    # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
     s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
     s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
     attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
     attn_probs = attn_probs[:, :, 1:]
 
-    attn_states = tf.einsum('abdh,adc->abhc', attn_probs, seq)
+    attn_states = tf.einsum('abdh,adc->abhc', attn_probs, value)
 
     return attn_scores, attn_probs, attn_states, edge_probs, edge_logits
 
