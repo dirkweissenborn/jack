@@ -91,8 +91,9 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
         encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
         encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
 
-        start_scores, end_scores, span = _simple_answer_layer(
-            encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+        with tf.variable_scope("answer_layer"):
+            start_scores, end_scores, span = _simple_answer_layer(
+                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
         if shared_resources.config.get('num_interactive', 0):
             for i in range(shared_resources.config.get('num_interactive', 0)):
@@ -112,8 +113,9 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                     encoded_support_list = self.encoder(shared_resources, emb_support + question2support,
                                                         tensors.support_length, tensors)
 
-            new_start_scores, new_end_scores, span = _simple_answer_layer(
-                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+            with tf.variable_scope("answer_layer", reuse=True):
+                new_start_scores, new_end_scores, span = _simple_answer_layer(
+                    encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
             return TensorPort.to_mapping(self.output_ports,
                                          (start_scores, end_scores, span, new_start_scores, new_end_scores))
