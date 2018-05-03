@@ -9,7 +9,7 @@ from jack.readers.extractive_qa.tensorflow.answer_layer import compute_question_
 from jack.tfutil import misc
 from jack.tfutil.embedding import conv_char_embedding
 from jack.tfutil.highway import highway_network
-from jack.tfutil.sequence_encoder import gated_linear_convnet
+from jack.tfutil.sequence_encoder import gated_linear_convnet, encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
 
@@ -487,29 +487,24 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         dropout = shared_resources.config.get("dropout", 0.0)
         representations = list()
         segm_probs = None
-        # ctrl = encoder(emb, length, repr_dim, module='conv_separable', num_layers=1, conv_width=5)
-        ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        attn_probs = None
+        state = encoder(emb, length, repr_dim, module='conv_glu', num_layers=2, conv_width=5, residual=True)
+        # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
         # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
-        representations.append(emb)
-        representations.append(ctrl)
 
-        step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
-
-        mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
-        state = emb + ctrl
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("self_attn", reuse=i > 0):
-                scores, probs, states, segm_probs, segm_logits = segment_self_attention(
+                scores, attn_probs, states, segm_probs, segm_logits = segment_self_attention(
                     state, length, tensors.is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
-                    num_heads=num_heads, edge_probs=segm_probs)
+                    num_heads=num_heads, edge_probs=segm_probs, attn_probs=attn_probs)
                 if i == 0:
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-                tf.identity(probs, name='selection_probs_' + str(i))
+                    tf.identity(attn_probs, name='selection_probs')
 
                 s = tf.shape(states)
-                new_segms = tf.layers.dense(tf.reshape(states, [s[0], s[1], value_dim * num_heads]), repr_dim, tf.tanh)
-                representations.append(new_segms)
-                state += new_segms
+                new_state = tf.layers.dense(tf.reshape(states, [s[0], s[1], value_dim * num_heads]),
+                                            repr_dim, tf.tanh, name='self_attn_projection')
+                state += new_state
 
         return [state]
 

@@ -332,7 +332,7 @@ def incremental_assoc_memory_encoder(length, repr_dim, num_slots, frame_probs, s
 
 
 def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
-                           num_heads=1, edge_probs=None):
+                           num_heads=1, edge_probs=None, attn_probs=None):
     edge_logits = None
     if edge_probs is None:
         # [B, L, H]
@@ -344,35 +344,37 @@ def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True
 
     batch_size = tf.shape(seq)[0]
     l = tf.shape(seq)[1]
-    with tf.variable_scope('key_value_projection') as vs:
+
+    value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='value'), [batch_size, -1, num_heads, value_dim])
+    attn_scores = None
+    if attn_probs is None:
         key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
-        value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='value'),
-                           [batch_size, -1, num_heads, value_dim])
+
         query = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='query'),
                            [batch_size, -1, num_heads, key_dim])
 
-    # [B, L, L, H]
-    attn_scores = tf.einsum('abhc,adhc->abdh', query, key)
-    attn_scores += tf.transpose(tf.layers.dense(query, 1, use_bias=False), [0, 1, 3, 2])
-    attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 3, 1, 2])
-    if scaled:
-        attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
+        # [B, L, L, H]
+        attn_scores = tf.einsum('abhc,adhc->abdh', query, key)
+        attn_scores += tf.transpose(tf.layers.dense(query, 1, use_bias=False), [0, 1, 3, 2])
+        attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 3, 1, 2])
+        if scaled:
+            attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
 
-    # [B * H, L, 1]
-    edge_probs_t = tf.reshape(tf.transpose(edge_probs, [0, 2, 1]), [batch_size * num_heads, -1, 1])
-    # [B * H, L, L]
-    associations = intra_segm_contributions(edge_probs_t, tf.tile(length, [num_heads]))
-    # [B, L, L, H]
-    associations = tf.transpose(tf.reshape(associations, [batch_size, num_heads, l, l]), [0, 2, 3, 1])
-    attn_scores += tf.log(associations + 1e-10)
+        # [B * H, L, 1]
+        edge_probs_t = tf.reshape(tf.transpose(edge_probs, [0, 2, 1]), [batch_size * num_heads, -1, 1])
+        # [B * H, L, L]
+        associations = intra_segm_contributions(edge_probs_t, tf.tile(length, [num_heads]))
+        # [B, L, L, H]
+        associations = tf.transpose(tf.reshape(associations, [batch_size, num_heads, l, l]), [0, 2, 3, 1])
+        attn_scores += tf.log(associations + 1e-10)
 
-    # exclude attending to state itself
-    # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
+        # exclude attending to state itself
+        # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
-    s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
-    s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
-    attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
-    attn_probs = attn_probs[:, :, 1:]
+        s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+        s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
+        attn_probs = tf.nn.softmax(tf.concat([s, attn_scores], 2), 2)
+        attn_probs = attn_probs[:, :, 1:]
 
     attn_states = tf.einsum('abdh,adhc->abhc', attn_probs, value)
 
