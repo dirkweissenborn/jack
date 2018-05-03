@@ -168,7 +168,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
         if tf.get_collection(tf.GraphKeys.LOSSES):
             loss += tf.reduce_sum(tf.get_collection(tf.GraphKeys.LOSSES))
 
-        if shared_resources.config.get('is_interactive', False):
+        if shared_resources.config.get('is_interactive', False) or shared_resources.config.get('num_interactive'):
             non_interactive_loss = xqa_crossentropy_loss(
                 tensors.additional_start_scores, tensors.additional_end_scores, tensors.answer_span,
                 tensors.answer2support, tensors.support2question,
