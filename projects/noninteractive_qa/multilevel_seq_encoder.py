@@ -345,7 +345,8 @@ def segment_self_attention(seq, length, is_eval, key_dim, value_dim, scaled=True
     batch_size = tf.shape(seq)[0]
     l = tf.shape(seq)[1]
 
-    value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='value'), [batch_size, -1, num_heads, value_dim])
+    value = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, tf.nn.relu, name='value'),
+                       [batch_size, -1, num_heads, value_dim])
     attn_scores = None
     if attn_probs is None:
         key = tf.reshape(tf.layers.dense(seq, key_dim * num_heads, name='key'), [batch_size, -1, num_heads, key_dim])
