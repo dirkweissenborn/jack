@@ -505,8 +505,8 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("self_attn", reuse=i > 0):
                 scores, attn_probs, states, segm_probs, segm_logits = segment_self_attention(
-                    state, state, length, tensors.is_eval, key_dim, value_dim, scaled=True, key_value_attn=True,
-                    num_heads=num_heads, edge_probs=segm_probs, attn_probs=attn_probs)
+                    state, state, length, tensors.is_eval, key_dim, value_dim, scaled=True,
+                    num_heads=num_heads, attn_probs=attn_probs)
                 if i == 0:
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
                     tf.identity(attn_probs, name='selection_probs')
@@ -716,7 +716,7 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
                     tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
                     segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True)
 
-                    symbol_bow = bow_segm_encoder(symbols, length, repr_dim, segm_probs, normalize=True,
+                    symbol_bow = bow_segm_encoder(symbols, length, repr_dim, segm_probs, normalize=False,
                                                   transform=False)
 
                     # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
@@ -731,13 +731,16 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
         one_hot_q = tf.one_hot(tensors.question_words, max_vocab, 1.0, dtype=tf.float32)
         one_hot_s = tf.one_hot(tensors.support_words, max_vocab, 1.0, dtype=tf.float32)
 
+        one_hot_q *= tf.layers.dense(emb_question, 1, tf.sigmoid)
+        one_hot_s *= tf.layers.dense(emb_support, 1, tf.sigmoid)
+
         with tf.variable_scope("encoder") as vs:
             encoded_question_list, question_bows = encode(emb_question, one_hot_q, tensors.question_length)
             vs.reuse_variables()
             encoded_support_list, support_bows = encode(emb_support, one_hot_s, tensors.support_length)
 
-        encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
-        encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
+        tf.concat(encoded_question_list, 2, name='question_representation')
+        tf.concat(encoded_support_list, 2, name='support_representation')
 
         with tf.variable_scope("answer_layer"):
             start_scores, end_scores, span, weights = _simple_answer_layer(
