@@ -548,8 +548,8 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
 
             #  [B, L, L, 2H] normalize
             A_trans = A  #/ D #(D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 1]))
-            #A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
-
+            A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
+            A_trans = tf.concat([A_trans, tf.transpose(A_back, [0, 2, 1, 3])], 3)
             #A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
 
             #D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
@@ -559,12 +559,13 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             #A_trans = tf.transpose(A_trans, [0, 2, 3, 1])
 
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-        tf.identity(A_trans, name='selection_probs')
+        tf.identity(A, name='selection_probs')
 
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("GCN_" + str(i)):
-                new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')  # , use_bias=False)
-                new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
+                new_state = tf.layers.dense(state, 2 * num_heads * repr_dim,
+                                            name='state_projection')  # , use_bias=False)
+                new_state = tf.reshape(new_state, [-1, l, repr_dim, 2 * num_heads])
                 new_state = tf.nn.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state))
                 # new_state = tf.layers.dense(new_state, repr_dim, tf.tanh, name='state_projection_2')
                 gate = tf.layers.dense(tf.concat([state, new_state], 2), repr_dim, tf.sigmoid, name='gate',
