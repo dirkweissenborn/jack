@@ -381,8 +381,8 @@ def segment_self_attention_scores(ctrl, seq, length, is_eval, key_dim, scaled=Tr
 
         # [B, L, L, H]
         attn_scores = tf.einsum('abhc,adhc->abdh', query, key)
-        attn_scores += tf.transpose(tf.layers.dense(query, 1, use_bias=False), [0, 1, 3, 2])
-        attn_scores += tf.transpose(tf.layers.dense(key, 1, use_bias=False), [0, 3, 1, 2])
+        attn_scores += tf.transpose(tf.layers.dense(query, num_heads, use_bias=False), [0, 1, 3, 2])
+        attn_scores += tf.transpose(tf.layers.dense(key, num_heads, use_bias=False), [0, 3, 1, 2])
         if scaled:
             attn_scores /= math.sqrt(float(query.get_shape()[-1].value))
 

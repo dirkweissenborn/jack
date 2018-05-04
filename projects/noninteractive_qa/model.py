@@ -509,10 +509,6 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         return [state]
 
 
-def _mysoftmax(t):
-    t = tf.reduce_max(t, )
-
-
 class HierarchicalGCNQAModule(NonInteractiveQAModule):
     def encoder(self, shared_resources, emb, length, tensors):
         repr_dim = shared_resources.config["repr_dim"]
@@ -531,26 +527,26 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             # [B, L, L, H]
             A, segm_probs, segm_logits = segment_self_attention_scores(
                 state, state, length, tensors.is_eval, key_dim, num_heads=num_heads, exclude_self=True)
-            # s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
-            # s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
+            s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+            s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
 
             # also add backward connections, [B, L, L, 2H]
-            A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
+            A = tf.nn.softmax(tf.concat([s, A], 2), 2)[:, :, 1:]
+            # A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
 
             # only 1 edge should be active
-            A = tf.multiply(tf.nn.sigmoid(A), tf.nn.softmax(A), 'selection_probs')
+            #A = tf.nn.sigmoid(A)# * tf.nn.softmax(A)
 
             # [B, 2H, L, L]
             # A = tf.transpose(A, [0, 3, 1, 2])
 
             l = tf.shape(state)[1]
-            A += tf.expand_dims(tf.expand_dims(tf.eye(l, l), axis=0), axis=3)
+            #A += tf.expand_dims(tf.expand_dims(tf.eye(l, l), axis=0), axis=3)
             #  [B, L, 1, 2H]
-            D_sqrt = tf.sqrt(tf.reduce_sum(A, axis=2, keep_dims=True))
+            #D = tf.maximum(1.0, tf.reduce_sum(A, axis=2, keep_dims=True))
 
             #  [B, L, L, 2H] normalize
-            A_trans = A / (D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 2 * num_heads]))
-
+            A_trans = A  #/ D #(D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 1]))
             #A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
 
             #A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
@@ -562,16 +558,21 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             #A_trans = tf.transpose(A_trans, [0, 2, 3, 1])
 
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+        tf.identity(A_trans, name='selection_probs')
 
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("GCN_" + str(i)):
-                new_state = tf.layers.dense(state, 2 * num_heads * repr_dim, name='state_projection')
-                new_state = tf.reshape(new_state, [-1, l, repr_dim, 2 * num_heads])
-                new_state = tf.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state))
+                new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')  # , use_bias=False)
+                new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
+                new_state = tf.nn.relu(tf.einsum('abch,acrh->abr', A_trans, new_state))
+                # new_state = tf.layers.dense(new_state, repr_dim, tf.tanh, name='state_projection_2')
+                gate = tf.layers.dense(tf.concat([state, new_state], 2), repr_dim, tf.sigmoid, name='gate',
+                                       bias_initializer=tf.constant_initializer(1.0))
 
-                state += new_state
+                state = (1.0 - gate) * new_state + gate * state
 
         return [state]
+
 
 
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
