@@ -597,37 +597,34 @@ class HierarchicalJointAttnQAModule(NonInteractiveQAModule):
                              lambda: tf.round(tf.sigmoid(segm_logits)),
                              lambda: gumbel_sigmoid(segm_logits))
 
-        # [B, L, H]
-
-        with tf.variable_scope('adjacency'):
-            # [B, L, H]
-            A = tf.layers.dense(tf.layers.dense(state, repr_dim, tf.nn.relu), num_heads)
-            A = tf.tile(tf.expand_dims(A, 1), [1, l, 1, 1])
-
-            # [B * H, L, 1]
-            segm_probs_t = tf.reshape(tf.transpose(segm_probs, [0, 2, 1]), [-1, l, 1])
-            # [B * H, L, L]
-            associations = intra_segm_contributions(segm_probs_t, tf.tile(length, [num_heads]))
-            # [B, L, L, H]
-            associations = tf.transpose(tf.reshape(associations, [-1, num_heads, l, l]), [0, 2, 3, 1])
-            A += tf.log(associations + 1e-10)
-
-            # exclude attending to state itself
-            A += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(A)[1]], -1e6)), 0), 3)
-
-            # [B, L, L, H]
-            s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
-            s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
-
-            # also add backward connections, [B, L, L, 2H]
-            A = tf.nn.softmax(tf.concat([s, A], 2), 2)[:, :, 1:]
-
-            l = tf.shape(state)[1]
-
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-        tf.identity(A, name='selection_probs')
 
         for i in range(shared_resources.config['num_layers']):
+            # [B, L, H]
+            with tf.variable_scope('adjacency' if i == 0 else 'adjacency' + str(i)):
+                # [B, L, H]
+                A = tf.layers.dense(tf.layers.dense(state, repr_dim, tf.nn.relu), num_heads)
+                A = tf.tile(tf.expand_dims(A, 1), [1, l, 1, 1])
+
+                # [B * H, L, 1]
+                segm_probs_t = tf.reshape(tf.transpose(segm_probs, [0, 2, 1]), [-1, l, 1])
+                # [B * H, L, L]
+                associations = intra_segm_contributions(segm_probs_t, tf.tile(length, [num_heads]))
+                # [B, L, L, H]
+                associations = tf.transpose(tf.reshape(associations, [-1, num_heads, l, l]), [0, 2, 3, 1])
+                A += tf.log(associations + 1e-10)
+
+                # exclude attending to state itself
+                A += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(A)[1]], -1e6)), 0), 3)
+
+                # [B, L, L, H]
+                s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+                s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
+
+                A = tf.nn.softmax(tf.concat([s, A], 2), 2)[:, :, 1:]
+
+            tf.identity(A, name='selection_probs' + str(i))
+
             with tf.variable_scope("GCN_" + str(i)):
                 new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')  # , use_bias=False)
                 new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
