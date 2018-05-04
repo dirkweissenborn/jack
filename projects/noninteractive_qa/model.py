@@ -530,7 +530,7 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
             s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
 
-            # also add backward connections, [B, L, L, 2H]
+            # also add backward connections, [B, L, L, H]
             A = tf.nn.softmax(tf.concat([s, A], 2), 2)[:, :, 1:]
             # A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
 
@@ -564,7 +564,7 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             with tf.variable_scope("GCN_" + str(i)):
                 new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')  # , use_bias=False)
                 new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
-                new_state = tf.nn.relu(tf.einsum('abch,acrh->abr', A_trans, new_state))
+                new_state = tf.nn.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state))
                 # new_state = tf.layers.dense(new_state, repr_dim, tf.tanh, name='state_projection_2')
                 gate = tf.layers.dense(tf.concat([state, new_state], 2), repr_dim, tf.sigmoid, name='gate',
                                        bias_initializer=tf.constant_initializer(1.0))
@@ -573,6 +573,72 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
 
         return [state]
 
+
+class HierarchicalJointAttnQAModule(NonInteractiveQAModule):
+    def encoder(self, shared_resources, emb, length, tensors):
+        repr_dim = shared_resources.config["repr_dim"]
+        key_dim = shared_resources.config.get("key_dim", 64)
+        value_dim = shared_resources.config.get("value_dim")
+        num_heads = shared_resources.config['num_heads']
+        dropout = shared_resources.config.get("dropout", 0.0)
+        representations = list()
+        segm_probs = None
+        attn_probs = None
+        state = encoder(emb, length, repr_dim, module='conv_glu', num_layers=1, conv_width=5, residual=True)
+        # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+        # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+
+        l = tf.shape(state)[1]
+
+        # [B, L, H]
+        segm_logits = tf.layers.dense(tf.layers.dense(state, 16, tf.nn.relu, name='edge_logits_hidden'),
+                                      num_heads, name='segm_logits')
+        segm_probs = tf.cond(tensors.is_eval,
+                             lambda: tf.round(tf.sigmoid(segm_logits)),
+                             lambda: gumbel_sigmoid(segm_logits))
+
+        # [B, L, H]
+
+        with tf.variable_scope('adjacency'):
+            # [B, L, H]
+            A = tf.layers.dense(tf.layers.dense(state, repr_dim, tf.nn.relu), num_heads)
+            A = tf.tile(tf.expand_dims(A, 1), [1, l, 1, 1])
+
+            # [B * H, L, 1]
+            segm_probs_t = tf.reshape(tf.transpose(segm_probs, [0, 2, 1]), [-1, l, 1])
+            # [B * H, L, L]
+            associations = intra_segm_contributions(segm_probs_t, tf.tile(length, [num_heads]))
+            # [B, L, L, H]
+            associations = tf.transpose(tf.reshape(associations, [-1, num_heads, l, l]), [0, 2, 3, 1])
+            A += tf.log(associations + 1e-10)
+
+            # exclude attending to state itself
+            A += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(A)[1]], -1e6)), 0), 3)
+
+            # [B, L, L, H]
+            s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+            s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
+
+            # also add backward connections, [B, L, L, 2H]
+            A = tf.nn.softmax(tf.concat([s, A], 2), 2)[:, :, 1:]
+
+            l = tf.shape(state)[1]
+
+        tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+        tf.identity(A, name='selection_probs')
+
+        for i in range(shared_resources.config['num_layers']):
+            with tf.variable_scope("GCN_" + str(i)):
+                new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')  # , use_bias=False)
+                new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
+                new_state = tf.nn.relu(tf.einsum('abch,acrh->abr', A, new_state))
+                # new_state = tf.layers.dense(new_state, repr_dim, tf.tanh, name='state_projection_2')
+                gate = tf.layers.dense(tf.concat([state, new_state], 2), repr_dim, tf.sigmoid, name='gate',
+                                       bias_initializer=tf.constant_initializer(1.0))
+
+                state = (1.0 - gate) * new_state + gate * state
+
+        return [state]
 
 
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
