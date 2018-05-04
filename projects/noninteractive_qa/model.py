@@ -509,6 +509,9 @@ class HierarchicalSelfAttnQAModule(NonInteractiveQAModule):
         return [state]
 
 
+def _mysoftmax(t):
+    t = tf.reduce_max(t, )
+
 
 class HierarchicalGCNQAModule(NonInteractiveQAModule):
     def encoder(self, shared_resources, emb, length, tensors):
@@ -524,7 +527,7 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
         # ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
         # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
 
-        with tf.variable_scope('ajacency'):
+        with tf.variable_scope('adjacency'):
             # [B, L, L, H]
             A, segm_probs, segm_logits = segment_self_attention_scores(
                 state, state, length, tensors.is_eval, key_dim, num_heads=num_heads, exclude_self=True)
@@ -535,17 +538,18 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
 
             # only 1 edge should be active
-            A = tf.nn.sigmoid(A) * tf.nn.softmax(A)
+            A = tf.multiply(tf.nn.sigmoid(A), tf.nn.softmax(A), 'selection_probs')
 
             # [B, 2H, L, L]
             # A = tf.transpose(A, [0, 3, 1, 2])
 
             l = tf.shape(state)[1]
+            A += tf.expand_dims(tf.expand_dims(tf.eye(l, l), axis=0), axis=3)
             #  [B, L, 1, 2H]
-            D_sqrt = tf.sqrt(1.0 / tf.reduce_sum(A, axis=2, keep_dims=True) + 1e-8)
+            D_sqrt = tf.sqrt(tf.reduce_sum(A, axis=2, keep_dims=True))
 
             #  [B, L, L, 2H] normalize
-            A_trans = A / D_sqrt / tf.reshape(D_sqrt, [-1, 1, l, 2 * num_heads])
+            A_trans = A / (D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 2 * num_heads]))
 
             #A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
 
@@ -558,7 +562,6 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             #A_trans = tf.transpose(A_trans, [0, 2, 3, 1])
 
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-        tf.identity(A, name='selection_probs')
 
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("GCN_" + str(i)):
