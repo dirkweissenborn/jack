@@ -359,7 +359,7 @@ def segment_self_attention(ctrl, seq, length, is_eval, key_dim, value_dim=None, 
 
 
 def segment_self_attention_scores(ctrl, seq, length, is_eval, key_dim, scaled=True,
-                                  num_heads=1, edge_probs=None, attn_probs=None):
+                                  num_heads=1, edge_probs=None, attn_probs=None, exclude_self=False):
     edge_logits = None
     if edge_probs is None:
         # [B, L, H]
@@ -395,7 +395,8 @@ def segment_self_attention_scores(ctrl, seq, length, is_eval, key_dim, scaled=Tr
         attn_scores += tf.log(associations + 1e-10)
 
         # exclude attending to state itself
-        # attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
+        if exclude_self:
+            attn_scores += tf.expand_dims(tf.expand_dims(tf.diag(tf.fill([tf.shape(attn_scores)[1]], -1e6)), 0), 3)
 
     return attn_scores, edge_probs, edge_logits
 

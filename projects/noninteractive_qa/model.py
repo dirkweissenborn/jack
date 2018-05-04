@@ -525,26 +525,45 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
         # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
 
         with tf.variable_scope('ajacency'):
-            scores, segm_probs, segm_logits = segment_self_attention_scores(
-                state, state, length, tensors.is_eval, key_dim, num_heads=num_heads)
+            # [B, L, L, H]
+            attn_scores, segm_probs, segm_logits = segment_self_attention_scores(
+                state, state, length, tensors.is_eval, key_dim, num_heads=num_heads, exclude_self=True)
+            # s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
+            # s = tf.tile(s, [tf.shape(attn_scores)[0], tf.shape(attn_scores)[1], 1, 1])
 
-            A = tf.nn.sigmoid(scores)
-            # [B*H, L, L]
+            A = tf.nn.sigmoid(attn_scores)
+
+            # [B, H, L, L]
+            A = tf.transpose(A, [0, 3, 1, 2])
+
+            D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=3) + 1e-8))
+            D_sqrt_back = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
+
             l = tf.shape(state)[1]
+
+            #A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
+
             #A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
 
-            D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
+            #D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
 
-            A_trans = A / (1e-8 + tf.reduce_sum(A, axis=2, keep_dims=True)) #tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
+            A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
+            A_back = tf.matmul(tf.matmul(D_sqrt_back, A), D_sqrt_back)
             # [B, L, L, H]
             #A_trans = tf.transpose(tf.reshape(A_trans, [-1, num_heads, l, l]), [0,2,3,1])
 
-        tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
-        tf.identity(tf.sigmoid(scores), name='selection_probs')
 
+        tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
+        tf.identity(A_trans, name='selection_probs')
 
         for i in range(shared_resources.config['num_layers']):
             with tf.variable_scope("GCN_" + str(i)):
+                new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection_back')
+                new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
+                new_state = tf.tanh(tf.einsum('acbh,acrh->abr', A_back, new_state))
+
+                state += new_state
+
                 new_state = tf.layers.dense(state, num_heads * repr_dim, name='state_projection')
                 new_state = tf.reshape(new_state, [-1, l, repr_dim, num_heads])
                 new_state = tf.tanh(tf.einsum('abch,acrh->abr', A_trans, new_state))
