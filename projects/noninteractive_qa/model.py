@@ -21,6 +21,53 @@ _end_scores = TensorPort(tf.float32, [None, None], "additional_end_scores",
                          "[S, max_num_tokens]")
 
 
+def embed(shared_resources, tensors):
+    input_size = shared_resources.config["repr_dim_input"]
+    repr_dim = shared_resources.config["repr_dim"]
+    with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
+    dropout = shared_resources.config.get("dropout", 0.0)
+    with_wiq = shared_resources.config.get('with_wiq', False)
+
+    emb_question = tensors.emb_question
+    emb_support = tensors.emb_support
+    if with_char_embeddings:
+        with tf.variable_scope("char_embeddings") as vs:
+            # compute combined embeddings
+            [char_emb_question, char_emb_support] = conv_char_embedding(
+                len(shared_resources.char_vocab), repr_dim, tensors.word_chars, tensors.word_char_length,
+                [tensors.question_words, tensors.support_words])
+
+            emb_question = tf.concat([emb_question, char_emb_question], 2)
+            emb_support = tf.concat([emb_support, char_emb_support], 2)
+            input_size += repr_dim
+
+            # set shapes for inputs
+            emb_question.set_shape([None, None, input_size])
+            emb_support.set_shape([None, None, input_size])
+
+            emb_question = tf.layers.dense(emb_question, repr_dim - 1 if with_wiq else repr_dim,
+                                           activation=tf.tanh, name="embeddings_projection")
+            emb_question = highway_network(emb_question, 1)
+            vs.reuse_variables()
+            emb_support = tf.layers.dense(emb_support, repr_dim - 1 if with_wiq else repr_dim,
+                                          activation=tf.tanh, name="embeddings_projection")
+            emb_support = highway_network(emb_support, 1)
+    mask = tf.nn.dropout(tf.ones([tf.shape(emb_question)[0], 1, repr_dim - 1 if with_wiq else repr_dim]),
+                         keep_prob=1.0 - dropout)
+    emb_support, emb_question = tf.cond(tensors.is_eval,
+                                        lambda: (emb_support, emb_question),
+                                        lambda: (emb_support * tf.gather(mask, tensors.support2question),
+                                                 emb_question * mask))
+
+    if shared_resources.config.get('with_wiq', False):
+        batch_size, q_len, _ = tf.unstack(tf.shape(emb_question))
+        emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 1])], 2)
+        emb_support = tf.concat([emb_support, tf.expand_dims(tensors.word_in_question, 2)], 2)
+
+    return emb_question, emb_support
+
+
+
 class NonInteractiveQAModule(AbstractXQAModelModule):
     @property
     def training_input_ports(self) -> Sequence[TensorPort]:
@@ -38,50 +85,13 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         input_size = shared_resources.config["repr_dim_input"]
         repr_dim = shared_resources.config["repr_dim"]
-        with_char_embeddings = shared_resources.config.get("with_char_embeddings", False)
         dropout = shared_resources.config.get("dropout", 0.0)
-        with_wiq = shared_resources.config.get('with_wiq', False)
 
         # set shapes for inputs
         tensors.emb_question.set_shape([None, None, input_size])
         tensors.emb_support.set_shape([None, None, input_size])
 
-        emb_question = tensors.emb_question
-        emb_support = tensors.emb_support
-        if with_char_embeddings:
-            with tf.variable_scope("char_embeddings") as vs:
-                # compute combined embeddings
-                [char_emb_question, char_emb_support] = conv_char_embedding(
-                    len(shared_resources.char_vocab), repr_dim, tensors.word_chars, tensors.word_char_length,
-                    [tensors.question_words, tensors.support_words])
-
-                emb_question = tf.concat([emb_question, char_emb_question], 2)
-                emb_support = tf.concat([emb_support, char_emb_support], 2)
-                input_size += repr_dim
-
-                # set shapes for inputs
-                emb_question.set_shape([None, None, input_size])
-                emb_support.set_shape([None, None, input_size])
-
-                emb_question = tf.layers.dense(emb_question, repr_dim - 1 if with_wiq else repr_dim,
-                                               activation=tf.tanh, name="embeddings_projection")
-                emb_question = highway_network(emb_question, 1)
-                vs.reuse_variables()
-                emb_support = tf.layers.dense(emb_support, repr_dim - 1 if with_wiq else repr_dim,
-                                              activation=tf.tanh, name="embeddings_projection")
-                emb_support = highway_network(emb_support, 1)
-
-        mask = tf.nn.dropout(tf.ones([tf.shape(emb_question)[0], 1, repr_dim - 1 if with_wiq else repr_dim]),
-                             keep_prob=1.0 - dropout)
-        emb_support, emb_question = tf.cond(tensors.is_eval,
-                                            lambda: (emb_support, emb_question),
-                                            lambda: (emb_support * tf.gather(mask, tensors.support2question),
-                                                     emb_question * mask))
-
-        if shared_resources.config.get('with_wiq', False):
-            batch_size, q_len, _ = tf.unstack(tf.shape(emb_question))
-            emb_question = tf.concat([emb_question, tf.ones([batch_size, q_len, 1])], 2)
-            emb_support = tf.concat([emb_support, tf.expand_dims(tensors.word_in_question, 2)], 2)
+        emb_question, emb_support = embed(shared_resources, tensors)
 
         with tf.variable_scope("encoder") as vs:
             encoded_question_list = self.encoder(shared_resources, emb_question, tensors.question_length, tensors)
@@ -92,7 +102,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
         encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
 
         with tf.variable_scope("answer_layer"):
-            start_scores, end_scores, span = _simple_answer_layer(
+            start_scores, end_scores, span, _ = _simple_answer_layer(
                 encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
         if shared_resources.config.get('num_interactive', 0):
@@ -114,7 +124,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                                         tensors.support_length, tensors)
 
             with tf.variable_scope("answer_layer", reuse=True):
-                new_start_scores, new_end_scores, span = _simple_answer_layer(
+                new_start_scores, new_end_scores, span, _ = _simple_answer_layer(
                     encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
             return TensorPort.to_mapping(self.output_ports,
@@ -651,6 +661,105 @@ class HierarchicalJointAttnQAModule(NonInteractiveQAModule):
         return [state]
 
 
+
+class SymbolicSegmentQAModule(AbstractXQAModelModule):
+
+    def create_output(self, shared_resources, input_tensors):
+        tensors = TensorPortTensors(input_tensors)
+
+        input_size = shared_resources.config["repr_dim_input"]
+        repr_dim = shared_resources.config["repr_dim"]
+        dropout = shared_resources.config.get("dropout", 0.0)
+
+        # set shapes for inputs
+        tensors.emb_question.set_shape([None, None, input_size])
+        tensors.emb_support.set_shape([None, None, input_size])
+
+        emb_question, emb_support = embed(shared_resources, tensors)
+
+        def encode(emb, symbols, length):
+            repr_dim = shared_resources.config["repr_dim"]
+            dropout = shared_resources.config.get("dropout", 0.0)
+            representations = list()
+            segm_probs = None
+            # ctrl = depthwise_separable_convolution(repr_dim, inputs, 5)
+            ctrl = gated_linear_convnet(repr_dim, emb, 1, conv_width=5)
+            # ctrl = convnet(repr_dim, emb, 1, conv_width=5, activation=tf.nn.tanh)
+            representations.append(emb)
+            representations.append(ctrl)
+
+            symbolic_reps = [symbols]
+
+            step = tf.train.get_global_step() or tf.constant(10000, tf.int32)
+
+            mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
+            segms = emb
+            for i in range(shared_resources.config['num_layers']):
+                with tf.variable_scope("layer" + str(i)):
+                    prev_segm_probs = segm_probs
+                    segm_probs, segm_logits = edge_detection_encoder(
+                        ctrl, repr_dim, tensors.is_eval)
+                    if prev_segm_probs is not None:
+                        segm_probs = tf.maximum(prev_segm_probs, segm_probs)
+
+                    # segm_probs = tf.cond(step >= 1000 * i,
+                    #                     lambda: segm_probs,
+                    #                     lambda: tf.stop_gradient(segm_probs))
+
+                    if i > 0:
+                        segm_probs_cum = intra_segm_sum(segm_probs, prev_segm_probs, length)
+                        prev_segm_probs_cum = intra_segm_sum(prev_segm_probs, prev_segm_probs, length)
+                        tf.add_to_collection(tf.GraphKeys.LOSSES, tf.reduce_mean(tf.reduce_sum(tf.maximum(
+                            0.0, (0.5 + prev_segm_probs_cum - segm_probs_cum) * mask), axis=[1, 2]) / tf.to_float(
+                            length)))
+
+                    tf.identity(tf.sigmoid(segm_logits), name='segm_probs' + str(i))
+                    segms = bow_segm_encoder(emb, length, repr_dim, segm_probs, normalize=True)
+
+                    symbol_bow = bow_segm_encoder(symbols, length, repr_dim, segm_probs, normalize=True,
+                                                  transform=False)
+
+                    # segms = tf.cond(tensors.is_eval, lambda: segms, lambda: segms * get_dropout_mask(i, is_support))
+                    representations.append(segms)
+                    symbolic_reps.append(symbol_bow)
+
+
+            return representations, symbolic_reps
+
+        max_vocab = tf.maximum(tf.reduce_max(tensors.question_words), tf.reduce_max(tensors.support_words))
+
+        one_hot_q = tf.one_hot(tensors.question_words, max_vocab, 1.0, dtype=tf.float32)
+        one_hot_s = tf.one_hot(tensors.support_words, max_vocab, 1.0, dtype=tf.float32)
+
+        with tf.variable_scope("encoder") as vs:
+            encoded_question_list, question_bows = encode(emb_question, one_hot_q, tensors.question_length)
+            vs.reuse_variables()
+            encoded_support_list, support_bows = encode(emb_support, one_hot_s, tensors.support_length)
+
+        encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
+        encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
+
+        with tf.variable_scope("answer_layer"):
+            start_scores, end_scores, span, weights = _simple_answer_layer(
+                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+
+            scores = tf.stack([tf.einsum('bv,blv->bl', tf.reduce_sum(weights * q, 1), s) for q, s in zip(question_bows, support_bows)], 2)
+            score = tf.layers.dense(scores, 1, use_bias=False, kernel_initializer=tf.constant_initializer(1.0))
+            score = tf.squeeze(score, 2)
+
+            start_scores += score
+            end_scores += score
+
+            start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
+                compute_spans(start_scores, end_scores, tensors.answer2support,
+                              tensors.is_eval,
+                              tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
+            span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
+
+        return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
+
+
+
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
     all_start_scores = []
     all_end_scores = []
@@ -679,7 +788,7 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
         compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
                       tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
     span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
-    return start_scores, end_scores, span
+    return start_scores, end_scores, span, question_attention_weights
 
 
 def _labeling_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
