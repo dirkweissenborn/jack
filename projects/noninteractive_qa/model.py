@@ -526,7 +526,8 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
         with tf.variable_scope('adjacency'):
             # [B, L, L, H]
             A, segm_probs, segm_logits = segment_self_attention_scores(
-                state, state, length, tensors.is_eval, key_dim, num_heads=num_heads, exclude_self=True)
+                state, state, length, tensors.is_eval, key_dim, num_heads=num_heads, exclude_self=False,
+                scaled=False)
             s = tf.get_variable('sentinel_score', [1, 1, 1, num_heads], tf.float32, tf.zeros_initializer())
             s = tf.tile(s, [tf.shape(A)[0], tf.shape(A)[1], 1, 1])
 
@@ -601,7 +602,7 @@ class HierarchicalJointAttnQAModule(NonInteractiveQAModule):
 
         for i in range(shared_resources.config['num_layers']):
             # [B, L, H]
-            with tf.variable_scope('adjacency' if i == 0 else 'adjacency' + str(i)):
+            with tf.variable_scope('adjacency', reuse=i > 0):
                 # [B, L, H]
                 A = tf.layers.dense(tf.layers.dense(state, repr_dim, tf.nn.relu), num_heads)
                 A = tf.tile(tf.expand_dims(A, 1), [1, l, 1, 1])
