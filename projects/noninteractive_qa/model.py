@@ -534,11 +534,12 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             # also add backward connections
             A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
 
+            # only 1 edge should be active
+            A = tf.nn.sigmoid(A) * tf.nn.softmax(A)
+
             # [B, 2H, L, L]
             A = tf.transpose(A, [0, 3, 1, 2])
 
-            # only 1 edge should be active
-            A = tf.nn.sigmoid(A) * tf.nn.softmax(A)
             D_sqrt = tf.matrix_diag(tf.sqrt(1.0 / tf.reduce_sum(A, axis=3) + 1e-8))
 
             l = tf.shape(state)[1]
