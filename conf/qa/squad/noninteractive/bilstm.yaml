@@ -16,5 +16,9 @@ encoder:
   - input: 'text'
     output: 'output_0'
     module: 'lstm'
+    num_layers: 1
     with_projection: True
+    residual: True
 
+
+gated_bow: {num_slots: 1}

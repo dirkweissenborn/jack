@@ -45,7 +45,7 @@ def intra_segm_contributions(segm_probs, length):
     log_keep = tf.log(tf.maximum(1.0 - segm_probs, 1e-8))
     mask = tf.expand_dims(tf.sequence_mask(length, dtype=tf.float32), 2)
     log_keep *= mask
-    # [B, L, 1]
+    # [B, L, None]
     cum_log_keep = tf.cumsum(log_keep, 1, exclusive=True)
 
     # [B, L, L]

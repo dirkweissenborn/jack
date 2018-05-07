@@ -21,6 +21,23 @@ _end_scores = TensorPort(tf.float32, [None, None], "additional_end_scores",
                          "[S, max_num_tokens]")
 
 
+def gated_bow(ctrl, symbols, length, num_slots=1, **kwargs):
+    gates = tf.layers.dense(ctrl, 2 * num_slots, name='bow_gates')
+    gates = tf.split(gates, 2 * num_slots, 2)
+
+    forget_gate = [tf.sigmoid(g - 1.0) for g in gates[:num_slots]]
+    input_gate = [tf.sigmoid(g) for g in gates[num_slots:]]
+
+    symbol_bows = []
+
+    l = tf.shape(ctrl)[1]
+    for i in range(num_slots):
+        # [B, L, L]
+        segm_contributions = intra_segm_contributions(forget_gate[i], length)
+        symbol_bows.append(tf.matmul(segm_contributions * tf.reshape(input_gate[i], [-1, l, 1]), symbols))
+    return symbol_bows, forget_gate, input_gate
+
+
 def embed(shared_resources, tensors):
     input_size = shared_resources.config["repr_dim_input"]
     repr_dim = shared_resources.config["repr_dim"]
@@ -67,7 +84,6 @@ def embed(shared_resources, tensors):
     return emb_question, emb_support
 
 
-
 class NonInteractiveQAModule(AbstractXQAModelModule):
     @property
     def training_input_ports(self) -> Sequence[TensorPort]:
@@ -99,11 +115,43 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             encoded_support_list = self.encoder(shared_resources, emb_support, tensors.support_length, tensors)
 
         encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
-        encoded_support = tf.concat(encoded_support_list, 2, name='question_representation')
+        encoded_support = tf.concat(encoded_support_list, 2, name='support_representation')
 
         with tf.variable_scope("answer_layer"):
-            start_scores, end_scores, span, _ = _simple_answer_layer(
+            start_scores, end_scores, span, weights = _simple_answer_layer(
                 encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+
+        if shared_resources.config.get('gated_bow'):
+            with tf.variable_scope('BoW'):
+                max_vocab = tf.maximum(tf.reduce_max(tensors.question_words), tf.reduce_max(tensors.support_words))
+
+                one_hot_q = tf.one_hot(tensors.question_words, max_vocab, 1.0, dtype=tf.float32)
+                one_hot_s = tf.one_hot(tensors.support_words, max_vocab, 1.0, dtype=tf.float32)
+
+                with tf.variable_scope("encoder") as vs:
+                    question_bows, q_fg, q_ig = gated_bow(encoded_question, one_hot_q, tensors.question_length,
+                                                          **shared_resources.config.get('gated_bow'))
+                    vs.reuse_variables()
+                    support_bows, s_fg, s_ig = gated_bow(encoded_support, one_hot_s, tensors.support_length,
+                                                         **shared_resources.config.get('gated_bow'))
+
+                weights = tf.reshape(weights, [-1, 1, tf.shape(weights)[1]])
+                scores = tf.add_n(
+                    [tf.einsum('bv,blv->bl', tf.squeeze(tf.matmul(weights, q), 1), s)
+                     for q, s in zip(question_bows, support_bows)])
+                scores = tf.expand_dims(scores, 2)
+                score = tf.layers.dense(scores, 1, use_bias=False, kernel_initializer=tf.constant_initializer(1.0))
+                score = tf.squeeze(score, 2)
+
+                start_scores += score
+                end_scores += score
+
+                start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
+                    compute_spans(start_scores, end_scores, tensors.answer2support,
+                                  tensors.is_eval,
+                                  tensors.support2question,
+                                  max_span_size=shared_resources.config.get('max_span_size', 16))
+                span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
         if shared_resources.config.get('num_interactive', 0):
             for i in range(shared_resources.config.get('num_interactive', 0)):
@@ -204,7 +252,7 @@ class NonInteractiveModularQAModule(NonInteractiveQAModule):
             {'text': emb}, {'text': length}, {},
             repr_dim, dropout, tensors.is_eval)[0]
 
-        return [emb] + [encoded[k] for k in sorted(encoded.keys()) if k.startswith('output')]
+        return [encoded[k] for k in sorted(encoded.keys()) if k.startswith('output')]
 
 
 class MultilevelSequenceEncoderQAModule(AbstractXQAModelModule):
@@ -546,27 +594,27 @@ class HierarchicalGCNQAModule(NonInteractiveQAModule):
             # A = tf.concat([A, tf.transpose(A, [0, 2, 1, 3])], 3)
 
             # only 1 edge should be active
-            #A = tf.nn.sigmoid(A)# * tf.nn.softmax(A)
+            # A = tf.nn.sigmoid(A)# * tf.nn.softmax(A)
 
             # [B, 2H, L, L]
             # A = tf.transpose(A, [0, 3, 1, 2])
 
             l = tf.shape(state)[1]
-            #A += tf.expand_dims(tf.expand_dims(tf.eye(l, l), axis=0), axis=3)
+            # A += tf.expand_dims(tf.expand_dims(tf.eye(l, l), axis=0), axis=3)
             #  [B, L, 1, 2H]
-            #D = tf.maximum(1.0, tf.reduce_sum(A, axis=2, keep_dims=True))
+            # D = tf.maximum(1.0, tf.reduce_sum(A, axis=2, keep_dims=True))
 
             #  [B, L, L, 2H] normalize
-            A_trans = A  #/ D #(D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 1]))
+            A_trans = A  # / D #(D_sqrt * tf.reshape(D_sqrt, [-1, 1, l, 1]))
             A_back = A_trans / tf.maximum(1.0, tf.reduce_sum(A_trans, axis=1, keep_dims=True))
             # A_trans = tf.concat([A_trans, tf.transpose(A_back, [0, 2, 1, 3])], 3)
-            #A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
+            # A = tf.reshape(tf.transpose(A, [0,3,1,2]), [-1, l, l])
 
-            #D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
+            # D_sqrt = 1.0 / tf.sqrt(tf.matrix_diag(tf.reduce_sum(A, axis=2) + 1e-8))
 
-            #A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
+            # A_trans = tf.matmul(tf.matmul(D_sqrt, A), D_sqrt)
             # [B, L, L, 2H]
-            #A_trans = tf.transpose(A_trans, [0, 2, 3, 1])
+            # A_trans = tf.transpose(A_trans, [0, 2, 3, 1])
 
         tf.identity(tf.sigmoid(segm_logits), name='segm_probs')
         tf.identity(A, name='selection_probs')
@@ -661,7 +709,6 @@ class HierarchicalJointAttnQAModule(NonInteractiveQAModule):
         return [state]
 
 
-
 class SymbolicSegmentQAModule(AbstractXQAModelModule):
 
     def create_output(self, shared_resources, input_tensors):
@@ -723,7 +770,6 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
                     representations.append(segms)
                     symbolic_reps.append(symbol_bow)
 
-
             return representations, symbolic_reps
 
         max_vocab = tf.maximum(tf.reduce_max(tensors.question_words), tf.reduce_max(tensors.support_words))
@@ -746,7 +792,8 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
             start_scores, end_scores, span, weights = _simple_answer_layer(
                 encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
 
-            scores = tf.stack([tf.einsum('bv,blv->bl', tf.reduce_sum(weights * q, 1), s) for q, s in zip(question_bows, support_bows)], 2)
+            scores = tf.stack([tf.einsum('bv,blv->bl', tf.reduce_sum(weights * q, 1), s) for q, s in
+                               zip(question_bows, support_bows)], 2)
             score = tf.layers.dense(scores, 1, use_bias=False, kernel_initializer=tf.constant_initializer(1.0))
             score = tf.squeeze(score, 2)
 
@@ -760,7 +807,6 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
             span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
         return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
-
 
 
 def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
