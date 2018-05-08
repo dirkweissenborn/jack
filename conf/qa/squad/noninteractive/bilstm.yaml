@@ -21,4 +21,5 @@ encoder:
     residual: True
 
 
-gated_bow: {num_slots: 1}
+#gated_bow: {num_slots: 1}
+distill: False

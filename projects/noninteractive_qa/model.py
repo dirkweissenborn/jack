@@ -153,6 +153,8 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                   max_span_size=shared_resources.config.get('max_span_size', 16))
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
+        new_start_scores, new_end_scores = start_scores, end_scores
+
         if shared_resources.config.get('num_interactive', 0):
             for i in range(shared_resources.config.get('num_interactive', 0)):
                 with tf.variable_scope('attention', reuse=i > 0):
@@ -174,9 +176,6 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
             with tf.variable_scope("answer_layer", reuse=True):
                 new_start_scores, new_end_scores, span, _ = _simple_answer_layer(
                     encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
-
-            return TensorPort.to_mapping(self.output_ports,
-                                         (new_start_scores, new_end_scores, span, start_scores, end_scores))
 
         if shared_resources.config.get('is_interactive', False):
             post_non_interactive_config = shared_resources.config['post_non_interactive']
@@ -209,13 +208,40 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                  tensors.answer2support, tensors.is_eval,
                                  tensors.correct_start, beam_size=beam_size, **answer_layer_config)
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
-            return TensorPort.to_mapping(self.output_ports,
-                                         (new_start_scores, new_end_scores, span, start_scores, end_scores))
-        else:
-            return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span, start_scores, end_scores))
+
+        if shared_resources.config.get('distill', False):
+            with tf.variable_scope("distilled_encoder") as vs:
+                encoded_question_list_distill = self.encoder(shared_resources, emb_question, tensors.question_length,
+                                                             tensors)
+                vs.reuse_variables()
+                encoded_support_list_distill = self.encoder(shared_resources, emb_support, tensors.support_length,
+                                                            tensors)
+            with tf.variable_scope("answer_layer", reuse=True):
+                new_start_scores, new_end_scores, span, weights = _simple_answer_layer(
+                    encoded_question_list_distill, encoded_support_list_distill, repr_dim, shared_resources, tensors)
+
+            def loss(t1, t2):
+                return tf.reduce_mean(tf.losses.mean_squared_error(t1, t2, loss_collection=None,
+                                                                   reduction=tf.losses.Reduction.NONE), 2)
+
+            new_start_scores = tf.add_n(
+                [loss(tf.stop_gradient(s1), s2)
+                 for s1, s2 in zip(encoded_support_list, encoded_support_list_distill)]) * tf.sequence_mask(
+                tensors.support_length, dtype=tf.float32)
+            new_end_scores = tf.add_n(
+                [loss(tf.stop_gradient(s1), s2)
+                 for s1, s2 in zip(encoded_question_list, encoded_question_list_distill)]) * tf.sequence_mask(
+                tensors.question_length, dtype=tf.float32)
+
+        return TensorPort.to_mapping(self.output_ports,
+                                     (new_start_scores, new_end_scores, span, start_scores, end_scores))
 
     def create_training_output(self, shared_resources, input_tensors):
         tensors = TensorPortTensors(input_tensors)
+        if shared_resources.config.get('distill', False):
+            return {Ports.loss: tf.reduce_mean(tf.reduce_sum(tensors.start_scores, 1)) +
+                                tf.reduce_mean(tf.reduce_sum(tensors.end_scores, 1))}
+
         loss = xqa_crossentropy_loss(
             tensors.start_scores, tensors.end_scores, tensors.answer_span,
             tensors.answer2support, tensors.support2question,
