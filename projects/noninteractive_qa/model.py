@@ -216,7 +216,10 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         if shared_resources.config.get('distill', False):
             with tf.variable_scope("distilled_embedder") as vs:
+                wiq = shared_resources.config['with_wiq']
+                shared_resources.config['with_wiq'] = False
                 emb_question, emb_support = embed(shared_resources, tensors)
+                shared_resources.config['with_wiq'] = wiq
             with tf.variable_scope("distilled_encoder") as vs:
                 encoded_question_list_distill = self.encoder(shared_resources, emb_question, tensors.question_length,
                                                              tensors)
