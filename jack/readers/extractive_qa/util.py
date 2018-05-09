@@ -33,8 +33,8 @@ def prepare_data(qa_setting: QASetting,
                  max_support_length: int = None,
                  lemmatize=False,
                  with_lemmas=False) \
-        -> Tuple[List[str], List[int], Optional[List[int]], int,
-                 List[List[str]], List[List[int]], Optional[List[List[int]]], List[int],
+        -> Tuple[List[str], List[int], Optional[List[str]], int,
+                 List[List[str]], List[List[int]], Optional[List[List[str]]], List[int],
                  List[List[float]], List[List[int]], List[List[Tuple[int, int]]]]:
     """Preprocesses a question and (optionally) answers:
     The steps include tokenization, lower-casing, translation to IDs,

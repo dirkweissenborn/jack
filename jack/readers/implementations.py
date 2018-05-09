@@ -152,7 +152,13 @@ def hierarchical_jointattn_qa_reader(resources_or_conf: Union[dict, SharedResour
 @extractive_qa_reader
 def non_interactive_qa_reader(resources_or_conf: Union[dict, SharedResources] = None):
     from projects.noninteractive_qa.model import NonInteractiveModularQAModule
-    return _tf_extractive_qa_reader(NonInteractiveModularQAModule, resources_or_conf)
+    from jack.readers.extractive_qa.shared import XQAOutputModule
+    from projects.noninteractive_qa.shared import XQAInputModuleWithLemma
+    shared_resources = create_shared_resources(resources_or_conf)
+    input_module = XQAInputModuleWithLemma(shared_resources)
+    model_module = NonInteractiveModularQAModule(shared_resources)
+    output_module = XQAOutputModule()
+    return TFReader(shared_resources, input_module, model_module, output_module)
 
 
 @extractive_qa_reader

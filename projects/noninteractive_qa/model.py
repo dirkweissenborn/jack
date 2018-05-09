@@ -12,6 +12,7 @@ from jack.tfutil.highway import highway_network
 from jack.tfutil.sequence_encoder import gated_linear_convnet, encoder
 from jack.tfutil.xqa import xqa_crossentropy_loss
 from projects.noninteractive_qa.multilevel_seq_encoder import *
+from projects.noninteractive_qa.shared import question_lemmas, support_lemmas
 
 _start_scores = TensorPort(tf.float32, [None, None], "additional_start_scores",
                            "Represents start scores for each support sequence",
@@ -93,6 +94,10 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
     def output_ports(self) -> Sequence[TensorPort]:
         return super().output_ports + [_start_scores, _end_scores]
 
+    @property
+    def input_ports(self) -> Sequence[TensorPort]:
+        return super().input_ports + [question_lemmas, support_lemmas]
+
     def encoder(self, shared_resources, emb, length, tensors):
         raise NotImplementedError()
 
@@ -123,10 +128,10 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
         if shared_resources.config.get('gated_bow'):
             with tf.variable_scope('BoW'):
-                max_vocab = tf.maximum(tf.reduce_max(tensors.question_words), tf.reduce_max(tensors.support_words))
+                max_vocab = tf.maximum(tf.reduce_max(tensors.question_lemmas), tf.reduce_max(tensors.support_lemmas))
 
-                one_hot_q = tf.one_hot(tensors.question_words, max_vocab, 1.0, dtype=tf.float32)
-                one_hot_s = tf.one_hot(tensors.support_words, max_vocab, 1.0, dtype=tf.float32)
+                one_hot_q = tf.one_hot(tensors.question_lemmas, max_vocab, 1.0, dtype=tf.float32)
+                one_hot_s = tf.one_hot(tensors.support_lemmas, max_vocab, 1.0, dtype=tf.float32)
 
                 with tf.variable_scope("encoder") as vs:
                     question_bows, q_fg, q_ig = gated_bow(encoded_question, one_hot_q, tensors.question_length,
