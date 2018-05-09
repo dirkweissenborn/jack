@@ -215,6 +215,8 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
         if shared_resources.config.get('distill', False):
+            with tf.variable_scope("distilled_embedder") as vs:
+                emb_question, emb_support = embed(shared_resources, tensors)
             with tf.variable_scope("distilled_encoder") as vs:
                 encoded_question_list_distill = self.encoder(shared_resources, emb_question, tensors.question_length,
                                                              tensors)
