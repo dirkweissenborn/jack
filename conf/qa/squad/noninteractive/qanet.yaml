@@ -32,9 +32,9 @@ encoder_block: &encoder_block
     repr_dim: 32
     layer_norm: True
 
-  #- input: 'text_self'
-  #  module: 'dense'
-  #  activation: 'relu'
+  - input: 'text_self'
+    module: 'dense'
+    activation: 'relu'
 
   - input: ['text', 'text_self']
     output: 'text'
@@ -53,7 +53,7 @@ encoder: &encoder
   - input: 'text'
     output: 'output_1'
     module: 'dense'
-    activation: 'tanh'
+    activation: 'relu'
     layer_norm: True
 
 
