@@ -24,23 +24,17 @@ encoder_block: &encoder_block
 
   - input: 'text'
     output: 'text_self'
-    module: 'dense'
-    repr_dim: 32
-    activation: 'relu'
-    layer_norm: True
-
-  - input: 'text_self'
     module: 'self_attn'
     attn_type: 'dot'
-    repr_dim: 32
     scaled: True
     num_attn_heads: 8
     key_value_attn: True
+    repr_dim: 32
     layer_norm: True
 
-  - input: 'text_self'
-    module: 'dense'
-    activation: 'relu'
+  #- input: 'text_self'
+  #  module: 'dense'
+  #  activation: 'relu'
 
   - input: ['text', 'text_self']
     output: 'text'
@@ -48,8 +42,8 @@ encoder_block: &encoder_block
 
 
 encoder: &encoder
-  - input: 'text'
-    module: 'positional_encoding'
+  #- input: 'text'
+  #  module: 'positional_encoding'
 
   - module: 'repeat'
     num: 1

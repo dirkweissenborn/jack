@@ -226,22 +226,21 @@ def positional_encoding(inputs, lengths, **kwargs):
 
 
 # Self attention layers
-def self_attention(inputs, lengths, attn_type='bilinear', scaled=True, repr_dim=None, activation=None,
-                   key_value_attn=False, with_sentinel=False, **kwargs):
+def self_attention(inputs, lengths, attn_type='bilinear', scaled=True, activation=None, with_sentinel=False, **kwargs):
     if attn_type == 'bilinear':
         attn_states = attention.bilinear_attention(
-            inputs, inputs, lengths, scaled, with_sentinel, key_value_attn=key_value_attn)[2]
+            inputs, inputs, lengths, scaled, with_sentinel, **kwargs)[2]
     elif attn_type == 'dot':
         attn_states = attention.dot_attention(
-            inputs, inputs, lengths, scaled, with_sentinel, key_value_attn=key_value_attn)[2]
+            inputs, inputs, lengths, scaled, with_sentinel, **kwargs)[2]
     elif attn_type == 'diagonal_bilinear':
         attn_states = \
             attention.diagonal_bilinear_attention(
-                inputs, inputs, lengths, scaled, with_sentinel, key_value_attn=key_value_attn)[2]
+                inputs, inputs, lengths, scaled, with_sentinel, **kwargs)[2]
     elif attn_type == 'mlp':
         attn_states = \
             attention.mlp_attention(
-                repr_dim, activation, inputs, inputs, lengths, with_sentinel, key_value_attn=key_value_attn)[2]
+                kwargs['repr_dim'], activation, inputs, inputs, lengths, with_sentinel, **kwargs)[2]
     else:
         raise ValueError("Unknown attention type: %s" % attn_type)
 
