@@ -13,6 +13,7 @@ reader: 'non_interactive_qa_reader'
 name: 'noninteractive_bilstm'
 
 filter_output: False
+top_k: 1
 
 encoder:
   - input: 'text'

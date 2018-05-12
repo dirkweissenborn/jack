@@ -86,6 +86,10 @@ def embed(shared_resources, tensors):
 
 
 class NonInteractiveQAModule(AbstractXQAModelModule):
+
+    def set_top_k(self, k):
+        self._top_k_assign(k)
+
     @property
     def training_input_ports(self) -> Sequence[TensorPort]:
         return super().training_input_ports + [_start_scores, _end_scores]
@@ -122,9 +126,16 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
         encoded_question = tf.concat(encoded_question_list, 2, name='question_representation')
         encoded_support = tf.concat(encoded_support_list, 2, name='support_representation')
 
+        top_k = tf.get_variable('top_k', initializer=shared_resources.config.get('top_k', 1), dtype=tf.int32,
+                                trainable=False)
+        top_k_p = tf.placeholder(tf.int32, [], 'top_k_setter')
+        top_k_assign = top_k.assign(top_k_p)
+        self._top_k_assign = lambda k: self.tf_session.run(top_k_assign, {top_k_p: k})
+
         with tf.variable_scope("answer_layer"):
             start_scores, end_scores, span, weights = _simple_answer_layer(
-                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+                encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors, top_k)
+
 
         if shared_resources.config.get('gated_bow'):
             with tf.variable_scope('BoW'):
@@ -155,6 +166,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                     compute_spans(start_scores, end_scores, tensors.answer2support,
                                   tensors.is_eval,
                                   tensors.support2question,
+                                  beam_size=top_k,
                                   max_span_size=shared_resources.config.get('max_span_size', 16))
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
@@ -180,7 +192,7 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
 
             with tf.variable_scope("answer_layer", reuse=True):
                 new_start_scores, new_end_scores, span, _ = _simple_answer_layer(
-                    encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors)
+                    encoded_question_list, encoded_support_list, repr_dim, shared_resources, tensors, top_k)
 
         if shared_resources.config.get('is_interactive', False):
             post_non_interactive_config = shared_resources.config['post_non_interactive']
@@ -199,19 +211,13 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                     answer_layer_config['repr_dim'] = repr_dim
                 if 'max_span_size' not in answer_layer_config:
                     answer_layer_config['max_span_size'] = shared_resources.config.get('max_span_size', 16)
-                beam_size = tf.get_variable(
-                    'beam_size', initializer=shared_resources.config.get('beam_size', 1), dtype=tf.int32,
-                    trainable=False)
-                beam_size_p = tf.placeholder(tf.int32, [], 'beam_size_setter')
-                beam_size_assign = beam_size.assign(beam_size_p)
-                self._beam_size_assign = lambda k: self.tf_session.run(beam_size_assign, {beam_size_p: k})
 
                 new_start_scores, new_end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
                     answer_layer(encoded_question, lengths[answer_layer_config.get('question', 'question')],
                                  encoded_support, lengths[answer_layer_config.get('support', 'support')],
                                  mappings[answer_layer_config.get('support', 'support')],
                                  tensors.answer2support, tensors.is_eval,
-                                 tensors.correct_start, beam_size=beam_size, **answer_layer_config)
+                                 tensors.correct_start, beam_size=top_k, **answer_layer_config)
                 span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
 
         if shared_resources.config.get('distill', False):
@@ -228,7 +234,8 @@ class NonInteractiveQAModule(AbstractXQAModelModule):
                                                             tensors)
             with tf.variable_scope("answer_layer", reuse=True):
                 new_start_scores, new_end_scores, span, weights = _simple_answer_layer(
-                    encoded_question_list_distill, encoded_support_list_distill, repr_dim, shared_resources, tensors)
+                    encoded_question_list_distill, encoded_support_list_distill, repr_dim, shared_resources, tensors,
+                    top_k)
 
             def loss(t1, t2):
                 return tf.reduce_mean(tf.losses.mean_squared_error(t1, t2, loss_collection=None,
@@ -845,7 +852,7 @@ class SymbolicSegmentQAModule(AbstractXQAModelModule):
         return TensorPort.to_mapping(self.output_ports, (start_scores, end_scores, span))
 
 
-def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors):
+def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_resources, tensors, top_k=1):
     all_start_scores = []
     all_end_scores = []
     # computing single time attention over question
@@ -871,7 +878,8 @@ def _simple_answer_layer(encoded_question, encoded_support, repr_dim, shared_res
 
     start_scores, end_scores, doc_idx, predicted_start_pointer, predicted_end_pointer = \
         compute_spans(tf.add_n(all_start_scores), tf.add_n(all_end_scores), tensors.answer2support, tensors.is_eval,
-                      tensors.support2question, max_span_size=shared_resources.config.get('max_span_size', 16))
+                      tensors.support2question, beam_size=top_k,
+                      max_span_size=shared_resources.config.get('max_span_size', 16))
     span = tf.stack([doc_idx, predicted_start_pointer, predicted_end_pointer], 1)
     return start_scores, end_scores, span, question_attention_weights
 
