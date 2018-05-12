@@ -14,13 +14,16 @@ reader: 'non_interactive_qa_reader'
 name: 'noninteractive_qanet'
 
 
+filter_output: False
+
 encoder_block: &encoder_block
   - input: 'text'
     module: 'conv_separable'
     conv_width: 7
     num_layers: 4
     residual: True
-    layer_norm: True
+    #layer_norm: True
+    activation: 'relu'
 
   - input: 'text'
     output: 'text_self'
@@ -30,7 +33,7 @@ encoder_block: &encoder_block
     num_attn_heads: 8
     key_value_attn: True
     repr_dim: 32
-    layer_norm: True
+    #layer_norm: True
 
   - input: 'text_self'
     module: 'dense'
@@ -54,7 +57,7 @@ encoder: &encoder
     output: 'output_1'
     module: 'dense'
     activation: 'relu'
-    layer_norm: True
+    #layer_norm: True
 
 
 post_non_interactive:
@@ -81,7 +84,7 @@ post_non_interactive:
     - input: 'support'
       output: 'text'
       module: 'dense'
-      activation: 'tanh'
+      activation: 'relu'
 
     - *encoder
 

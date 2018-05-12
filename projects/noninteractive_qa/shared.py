@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import NamedTuple
 
 from jack.core import *
-from jack.readers.extractive_qa.shared import XQAPorts, XQAInputModule
+from jack.readers.extractive_qa.shared import XQAPorts, XQAInputModule, XQAOutputModule
 from jack.readers.extractive_qa.util import prepare_data
 from jack.util import preprocessing
 from jack.util.map import numpify
@@ -14,10 +14,8 @@ from jack.util.preprocessing import sort_by_tfidf
 
 logger = logging.getLogger(__name__)
 
-
 question_lemmas = TensorPort(np.int32, [None, None], "question_lemmas", "Lemma idx per word", "[U]")
 support_lemmas = TensorPort(np.int32, [None, None], "support_lemmas", "Lemma idx per word", "[U]")
-
 
 XQAAnnotationWithLemma = NamedTuple('XQAAnnotationWithLemma', [
     ('question_tokens', List[str]),
@@ -55,8 +53,8 @@ class XQAInputModuleWithLemma(XQAInputModule, OnlineInputModule[XQAAnnotationWit
     def output_ports(self) -> List[TensorPort]:
         return self._output_ports
 
-
-    def preprocess_instance(self, question: QASetting, answers: Optional[List[Answer]] = None) -> XQAAnnotationWithLemma:
+    def preprocess_instance(self, question: QASetting,
+                            answers: Optional[List[Answer]] = None) -> XQAAnnotationWithLemma:
         has_answers = answers is not None
 
         q_tokenized, q_ids, q_lemma, q_length, s_tokenized, s_ids, s_lemma, s_length, \
@@ -97,7 +95,6 @@ class XQAInputModuleWithLemma(XQAInputModule, OnlineInputModule[XQAAnnotationWit
             support_lemmas=s_lemma
         )
 
-
     def create_batch(self, annotations: List[XQAAnnotationWithLemma], is_eval: bool, with_answers: bool) \
             -> Mapping[TensorPort, np.ndarray]:
         batch = super(XQAInputModuleWithLemma, self).create_batch(annotations, is_eval, with_answers)
@@ -117,3 +114,31 @@ class XQAInputModuleWithLemma(XQAInputModule, OnlineInputModule[XQAAnnotationWit
         # we can only numpify in here, because bucketing is not possible prior
         batch = numpify(batch, keys=[question_lemmas, support_lemmas])
         return batch
+
+
+class XQAOutputFilterModule(XQAOutputModule):
+    def __call__(self, questions, span_prediction,
+                 token_offsets, selected_support, support2question,
+                 start_scores, end_scores) -> Sequence[Sequence[Answer]]:
+        """Produces top-k answers for each question."""
+        answers = super(XQAOutputFilterModule, self).__call__(
+            questions, span_prediction,
+            token_offsets, selected_support, support2question,
+            start_scores, end_scores)
+
+        for i, (ans, q) in enumerate(zip(answers, questions)):
+            new_answers = []
+            q_lower = q.question.lower()
+            for a in ans:
+                a_t = a.text.lower().split()
+                good = True
+                max_span = len(a_t) // 2 + 1
+                for s in range(len(a_t) - max_span + 1):
+                    if ' '.join(a_t[s:s + max_span]) in q_lower:
+                        good = False
+                        break
+                if good:
+                    new_answers.append(a)
+            if new_answers:
+                answers[i] = new_answers
+        return answers

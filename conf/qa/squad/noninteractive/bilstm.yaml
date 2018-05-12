@@ -12,6 +12,8 @@ epochs: 12
 reader: 'non_interactive_qa_reader'
 name: 'noninteractive_bilstm'
 
+filter_output: False
+
 encoder:
   - input: 'text'
     output: 'output_0'

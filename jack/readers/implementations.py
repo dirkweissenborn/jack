@@ -86,10 +86,14 @@ def create_shared_resources(resources_or_config: Union[dict, SharedResources] = 
 
 def _tf_extractive_qa_reader(model_module_constructor, resources_or_conf: Union[dict, SharedResources]):
     from jack.readers.extractive_qa.shared import XQAInputModule, XQAOutputModule
+    from projects.noninteractive_qa.shared import XQAOutputFilterModule
     shared_resources = create_shared_resources(resources_or_conf)
     input_module = XQAInputModule(shared_resources)
     model_module = model_module_constructor(shared_resources)
-    output_module = XQAOutputModule()
+    if shared_resources.config.get('filter_output', False):
+        output_module = XQAOutputFilterModule()
+    else:
+        output_module = XQAOutputModule()
     return TFReader(shared_resources, input_module, model_module, output_module)
 
 
@@ -157,7 +161,11 @@ def non_interactive_qa_reader(resources_or_conf: Union[dict, SharedResources] = 
     shared_resources = create_shared_resources(resources_or_conf)
     input_module = XQAInputModuleWithLemma(shared_resources)
     model_module = NonInteractiveModularQAModule(shared_resources)
-    output_module = XQAOutputModule()
+    if shared_resources.config.get('filter_output', False):
+        from projects.noninteractive_qa.shared import XQAOutputFilterModule
+        output_module = XQAOutputFilterModule()
+    else:
+        output_module = XQAOutputModule()
     return TFReader(shared_resources, input_module, model_module, output_module)
 
 
